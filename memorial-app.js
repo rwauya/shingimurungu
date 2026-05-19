@@ -31,6 +31,8 @@ function media(filename, details = {}) {
     featured: Boolean(details.featured),
     orientation: details.orientation || "",
     transcript: details.transcript || "",
+    sphereThumbSrc: details.sphereThumbSrc || sphereThumbSrcFor(filename, type),
+    galleryThumbSrc: details.galleryThumbSrc || galleryThumbSrcFor(filename, type),
     thumbSrc: details.thumbSrc || thumbnailSrcFor(filename, type),
     safeThumbSrc: details.safeThumbSrc || safeThumbnailSrcFor(filename, type),
     posterSrc: details.posterSrc || posterSrcFor(filename, type)
@@ -64,6 +66,27 @@ function safeThumbnailSrcFor(filename, type) {
   const clean = filename.replace(/^\.\/images\//, "").replace(/^images\//, "");
   const stem = clean.replace(/\.[^.]+$/, "");
   return `./images/optimized/safe-thumbs/${stem}.webp`;
+}
+
+function sphereThumbSrcFor(filename, type) {
+  const extension = getExtension(filename);
+  const clean = filename.replace(/^\.\/images\//, "").replace(/^images\//, "");
+  const stem = clean.replace(/\.[^.]+$/, "");
+  if (type === "image" && ["jpg", "jpeg", "png", "webp"].includes(extension)) {
+    return `./images/optimized/sphere-thumbs/${stem}.webp`;
+  }
+  if (type === "video") {
+    return `./images/optimized/video-posters/${stem}.webp`;
+  }
+  return "";
+}
+
+function galleryThumbSrcFor(filename, type) {
+  const extension = getExtension(filename);
+  if (type !== "image" || !["jpg", "jpeg", "png", "webp"].includes(extension)) return "";
+  const clean = filename.replace(/^\.\/images\//, "").replace(/^images\//, "");
+  const stem = clean.replace(/\.[^.]+$/, "");
+  return `./images/optimized/gallery-thumbs/${stem}.webp`;
 }
 
 function posterSrcFor(filename, type) {
@@ -330,6 +353,7 @@ const memorialData = {
 const state = {
   currentFilter: "all",
   galleryExpanded: false,
+  galleryRenderToken: 0,
   lightboxItems: [],
   lightboxIndex: 0,
   lastFocusedElement: null,
@@ -360,6 +384,11 @@ const state = {
     lastInteraction: 0
   }
 };
+
+const SPHERE_MIN_ZOOM = 0.42;
+const SPHERE_MAX_ZOOM = 0.9;
+const SPHERE_FOCUS_ZOOM = 0.86;
+const GALLERY_BATCH_SIZE = 48;
 
 const selectors = {
   loader: "[data-loader]",
@@ -430,6 +459,8 @@ function normaliseMediaItems(items) {
         caption: normalised.caption || "A memory held in the family archive.",
         date: normalised.date || inferDateFromFilename(normalised.src),
         alt: normalised.alt || defaultAltText(normalised.type),
+        sphereThumbSrc: normalised.sphereThumbSrc || sphereThumbSrcFor(normalised.src, normalised.type),
+        galleryThumbSrc: normalised.galleryThumbSrc || galleryThumbSrcFor(normalised.src, normalised.type),
         thumbSrc: normalised.thumbSrc || thumbnailSrcFor(normalised.src, normalised.type),
         safeThumbSrc: normalised.safeThumbSrc || safeThumbnailSrcFor(normalised.src, normalised.type),
         posterSrc: normalised.posterSrc || posterSrcFor(normalised.src, normalised.type)
@@ -471,7 +502,8 @@ function renderMemorySphere() {
   if (!sphere) return;
 
   sphere.replaceChildren();
-  const sphereItems = getGalleryMedia();
+  const sourceItems = getGalleryMedia();
+  const sphereItems = getSphereDisplayItems(sourceItems);
   const metrics = getSphereMetrics(sphereItems.length);
   const shell = sphere.closest(".memory-sphere");
   const fragment = document.createDocumentFragment();
@@ -479,7 +511,7 @@ function renderMemorySphere() {
   state.sphere.positions = [];
   state.sphere.baseZoom = getDefaultSphereZoom(metrics, shell);
   if (!state.sphere.userZoomed) {
-    state.sphere.zoom = state.sphere.baseZoom;
+    state.sphere.zoom = clamp(state.sphere.baseZoom, SPHERE_MIN_ZOOM, SPHERE_MAX_ZOOM);
   }
 
   if (shell) {
@@ -508,13 +540,16 @@ function renderMemorySphere() {
 
     const tileSkin = document.createElement("span");
     tileSkin.className = "sphere-tile__skin";
-    const thumb = item.type === "video" ? item.posterSrc : (item.safeThumbSrc || item.thumbSrc || item.src);
-    if (thumb) {
+    const thumbCandidates = getSphereThumbCandidates(item);
+    if (thumbCandidates.length) {
       const img = document.createElement("img");
-      img.src = thumb;
+      img.src = thumbCandidates[0];
       img.alt = "";
       img.decoding = "async";
       img.loading = "lazy";
+      attachImageFallback(img, thumbCandidates, () => {
+        tileSkin.textContent = item.type === "video" ? "Video" : "Photo";
+      });
       tileSkin.append(img);
     } else {
       tileSkin.textContent = item.type === "video" ? "Video" : "Photo";
@@ -532,10 +567,33 @@ function getGalleryMedia() {
   return getFilteredMedia();
 }
 
+function getSphereDisplayItems(items) {
+  if (items.length === 0) return [];
+  const minimumTiles = items.length < 24 ? 72 : 0;
+  if (!minimumTiles) return items;
+
+  return Array.from({ length: minimumTiles }, (_, index) => items[index % items.length]);
+}
+
+function getSphereThumbCandidates(item) {
+  if (item.type === "video") return uniqueSources([item.sphereThumbSrc, item.posterSrc]);
+  return uniqueSources([item.sphereThumbSrc, item.galleryThumbSrc, item.safeThumbSrc, item.thumbSrc, item.src]);
+}
+
+function getGalleryThumbCandidates(item) {
+  if (item.type === "video") return uniqueSources([item.posterSrc]);
+  return uniqueSources([item.galleryThumbSrc, item.safeThumbSrc, item.thumbSrc, item.src]);
+}
+
+function uniqueSources(sources) {
+  return sources.filter(Boolean).filter((src, index, list) => list.indexOf(src) === index);
+}
+
 function getSphereMetrics(count) {
   const density = Math.sqrt(Math.max(count, 1));
-  const depth = clamp(420 + density * 8.5, 500, 1500);
-  const sphereDiameter = clamp(depth * 2.04, 920, 2600);
+  const baseDepth = clamp(580 + density * 11, 680, 1900);
+  const depth = baseDepth + 16;
+  const sphereDiameter = depth * 2;
   const stageSize = sphereDiameter;
   const cells = createSphereSurfaceCells(count, depth);
   return {
@@ -606,34 +664,55 @@ function createSphereSurfaceCells(total, radius) {
 function getDefaultSphereZoom(metrics, shell) {
   const availableWidth = Math.max(320, (shell ? shell.clientWidth : window.innerWidth) - 28);
   const fitZoom = (availableWidth / metrics.stageSize) * 0.9;
-  return clamp(fitZoom, 0.38, 0.78);
-}
-
-function updateGalleryRevealCount() {
-  const count = getFilteredMedia().length;
-  setText(selectors.galleryRevealCount, `${count} ${count === 1 ? "memory" : "memories"}`);
+  return clamp(fitZoom, 0.38, 0.82);
 }
 
 function renderGallery() {
-  const grid = document.querySelector(selectors.galleryGrid);
+  const imagesGrid = document.querySelector(selectors.galleryImagesGrid);
+  const videosGrid = document.querySelector(selectors.galleryVideosGrid);
+  const imagesSection = document.querySelector(selectors.galleryImagesSection);
+  const videosSection = document.querySelector(selectors.galleryVideosSection);
   const empty = document.querySelector(selectors.galleryEmpty);
-  const showMore = document.querySelector(selectors.showMore);
-  const archiveNote = document.querySelector(selectors.archiveNote);
-  if (!grid || !empty || !showMore || !archiveNote) return;
+  if (!imagesGrid || !videosGrid || !imagesSection || !videosSection || !empty) return;
 
-  const filtered = getFilteredMedia();
-  const visibleItems = state.galleryExpanded ? filtered : [];
-  grid.replaceChildren();
-  updateGalleryRevealCount();
+  const token = state.galleryRenderToken + 1;
+  state.galleryRenderToken = token;
+  const images = mediaItems.filter((item) => item.type === "image");
+  const videos = mediaItems.filter((item) => item.type === "video");
+  imagesGrid.replaceChildren();
+  videosGrid.replaceChildren();
 
-  empty.hidden = filtered.length !== 0 || !state.galleryExpanded;
-  grid.hidden = filtered.length === 0 || !state.galleryExpanded;
+  empty.hidden = (images.length + videos.length) !== 0 || !state.galleryExpanded;
+  imagesSection.hidden = images.length === 0 || !state.galleryExpanded;
+  videosSection.hidden = videos.length === 0 || !state.galleryExpanded;
 
-  visibleItems.forEach((item) => grid.append(createGalleryCard(item, filtered)));
+  if (state.galleryExpanded) {
+    appendGalleryBatch(imagesGrid, images, images, token);
+    appendGalleryBatch(videosGrid, videos, videos, token);
+  }
+}
 
-  archiveNote.textContent = `${filtered.length} ${filtered.length === 1 ? "memory" : "memories"}`;
+function appendGalleryBatch(grid, items, lightboxScope, token, start = 0) {
+  if (!items.length || token !== state.galleryRenderToken) return;
 
-  showMore.hidden = true;
+  const end = Math.min(start + GALLERY_BATCH_SIZE, items.length);
+  const fragment = document.createDocumentFragment();
+  for (let index = start; index < end; index += 1) {
+    fragment.append(createGalleryCard(items[index], lightboxScope));
+  }
+  grid.append(fragment);
+
+  if (end < items.length) {
+    scheduleIdleWork(() => appendGalleryBatch(grid, items, lightboxScope, token, end));
+  }
+}
+
+function scheduleIdleWork(callback) {
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(callback, { timeout: 220 });
+    return;
+  }
+  window.setTimeout(callback, 24);
 }
 
 function getFilteredMedia() {
@@ -687,8 +766,9 @@ function createImagePreview(item, options = {}) {
     return createFallback(item, unsupportedMessage(item));
   }
 
+  const sources = options.original ? [item.src] : getGalleryThumbCandidates(item);
   const img = document.createElement("img");
-  img.src = options.original ? item.src : (item.safeThumbSrc || item.thumbSrc || item.src);
+  img.src = sources[0] || item.src;
   img.alt = options.decorative ? "" : item.alt;
   img.decoding = "async";
   if (options.lazy) img.loading = "lazy";
@@ -700,13 +780,25 @@ function createImagePreview(item, options = {}) {
     }
   });
 
-  img.addEventListener("error", () => {
+  attachImageFallback(img, sources, () => {
     const fallback = createFallback(item, unsupportedMessage(item));
     if (options.frame) options.frame.replaceChildren(fallback);
     else img.replaceWith(fallback);
   });
 
   return img;
+}
+
+function attachImageFallback(img, sources, onEmpty) {
+  let sourceIndex = 0;
+  img.addEventListener("error", () => {
+    sourceIndex += 1;
+    if (sourceIndex < sources.length) {
+      img.src = sources[sourceIndex];
+      return;
+    }
+    if (typeof onEmpty === "function") onEmpty();
+  });
 }
 
 function createVideoPreview(item, options = {}) {
@@ -797,7 +889,6 @@ function createParagraph(text) {
 
 function bindInteractions() {
   const header = document.querySelector(selectors.header);
-  const showMore = document.querySelector(selectors.showMore);
   const lightbox = document.querySelector(selectors.lightbox);
 
   window.addEventListener("scroll", () => {
@@ -824,15 +915,10 @@ function bindInteractions() {
         tab.classList.toggle("is-active", active);
         tab.setAttribute("aria-pressed", String(active));
       });
-      updateGalleryRevealCount();
       renderMemorySphere();
       renderGallery();
     });
   });
-
-  if (showMore) {
-    showMore.hidden = true;
-  }
 
   if (lightbox) {
     lightbox.querySelectorAll("[data-close-lightbox]").forEach((element) => {
@@ -883,11 +969,11 @@ function handleSphereAction(action, button) {
     }
   }
   if (action === "zoom-in") {
-    state.sphere.zoom = clamp(state.sphere.zoom + 0.12, 0.42, 1.45);
+    state.sphere.zoom = clamp(state.sphere.zoom + 0.1, SPHERE_MIN_ZOOM, SPHERE_MAX_ZOOM);
     state.sphere.userZoomed = true;
   }
   if (action === "zoom-out") {
-    state.sphere.zoom = clamp(state.sphere.zoom - 0.12, 0.42, 1.45);
+    state.sphere.zoom = clamp(state.sphere.zoom - 0.1, SPHERE_MIN_ZOOM, SPHERE_MAX_ZOOM);
     state.sphere.userZoomed = true;
   }
   if (action === "reset") {
@@ -906,7 +992,7 @@ function handleSphereAction(action, button) {
   }
   if (action === "open-focused") {
     const item = state.sphere.items[state.sphere.focusIndex];
-    if (item) openLightboxBySrc(item.src, state.sphere.items);
+    if (item) openLightboxBySrc(item.src, getFilteredMedia());
     return;
   }
   if (action === "spy") {
@@ -933,13 +1019,16 @@ function bindSphereControls() {
 
   if (shell) {
     shell.addEventListener("pointerleave", () => {
-      if (state.sphere.spyMode) renderSphereSpy(null);
+      scheduleSphereSpyHide(0);
     });
   }
 
   if (preview) {
     preview.addEventListener("pointerenter", () => {
       window.clearTimeout(renderSphereSpy.hideTimer);
+    });
+    preview.addEventListener("pointerleave", () => {
+      scheduleSphereSpyHide(80);
     });
   }
 
@@ -970,9 +1059,9 @@ function bindSphereControls() {
     state.sphere.lastY = event.clientY;
     if (Math.hypot(totalX, totalY) > 14) state.sphere.moved = true;
     state.sphere.velocityY = deltaX * 0.28;
-    state.sphere.velocityX = -deltaY * 0.22;
+    state.sphere.velocityX = 0;
     state.sphere.rotationY += state.sphere.velocityY;
-    state.sphere.rotationX = clamp(state.sphere.rotationX + state.sphere.velocityX, -46, 46);
+    state.sphere.rotationX = 0;
     state.sphere.lastInteraction = performance.now();
     updateSphereTransform();
   });
@@ -980,7 +1069,10 @@ function bindSphereControls() {
   sphere.addEventListener("pointermove", (event) => {
     if (state.sphere.dragging || !state.sphere.spyMode) return;
     const tile = event.target.closest(".sphere-tile");
-    if (!tile) return;
+    if (!tile) {
+      scheduleSphereSpyHide(80);
+      return;
+    }
     updateSpherePreviewPosition(event);
   });
 
@@ -1011,9 +1103,17 @@ function bindSphereControls() {
   sphere.addEventListener("pointerover", (event) => {
     const tile = event.target.closest(".sphere-tile");
     if (!tile) return;
+    window.clearTimeout(renderSphereSpy.hideTimer);
     const index = Number(tile.dataset.index || 0);
     state.sphere.focusIndex = index;
     if (state.sphere.spyMode) renderSphereSpy(state.sphere.items[index], false, event);
+  });
+  sphere.addEventListener("pointerout", (event) => {
+    const tile = event.target.closest(".sphere-tile");
+    if (!tile) return;
+    const nextTarget = event.relatedTarget;
+    if (nextTarget && (tile.contains(nextTarget) || preview?.contains(nextTarget))) return;
+    scheduleSphereSpyHide(90);
   });
   sphere.addEventListener("focusin", (event) => {
     const tile = event.target.closest(".sphere-tile");
@@ -1035,8 +1135,7 @@ function bindSphereControls() {
     event.preventDefault();
     if (event.key === "ArrowLeft") state.sphere.rotationY -= step;
     if (event.key === "ArrowRight") state.sphere.rotationY += step;
-    if (event.key === "ArrowUp") state.sphere.rotationX = clamp(state.sphere.rotationX - step, -46, 46);
-    if (event.key === "ArrowDown") state.sphere.rotationX = clamp(state.sphere.rotationX + step, -46, 46);
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") state.sphere.rotationX = 0;
     state.sphere.lastInteraction = performance.now();
     updateSphereTransform();
   });
@@ -1050,8 +1149,8 @@ function focusSphereItem(index, showPanel) {
   state.sphere.focusIndex = nextIndex;
   if (position) {
     state.sphere.rotationY = -position.rotateY;
-    state.sphere.rotationX = clamp(-position.rotateX, -46, 46);
-    state.sphere.zoom = Math.max(state.sphere.zoom, 0.92);
+    state.sphere.rotationX = 0;
+    state.sphere.zoom = clamp(Math.max(state.sphere.zoom, SPHERE_FOCUS_ZOOM), SPHERE_MIN_ZOOM, SPHERE_MAX_ZOOM);
     state.sphere.userZoomed = true;
   }
   clearSphereFocus();
@@ -1071,7 +1170,12 @@ function openSphereTile(src) {
   if (src === state.sphere.lastOpenedSrc && now - state.sphere.lastOpenedAt < 220) return;
   state.sphere.lastOpenedSrc = src;
   state.sphere.lastOpenedAt = now;
-  openLightboxBySrc(src, state.sphere.items.length ? state.sphere.items : getFilteredMedia());
+  openLightboxBySrc(src, getFilteredMedia());
+}
+
+function scheduleSphereSpyHide(delay = 120) {
+  window.clearTimeout(renderSphereSpy.hideTimer);
+  renderSphereSpy.hideTimer = window.setTimeout(() => renderSphereSpy(null), delay);
 }
 
 function clearSphereFocus() {
@@ -1094,7 +1198,7 @@ function renderSphereSpy(item, temporary, anchor) {
   previewButton.setAttribute("aria-label", `Open ${item.title || "memory"} in the memorial viewer`);
   previewButton.addEventListener("click", () => openSphereTile(item.src));
 
-  const thumb = item.type === "video" ? item.posterSrc : (item.safeThumbSrc || item.thumbSrc || item.src);
+  const thumb = item.type === "video" ? item.posterSrc : (item.galleryThumbSrc || item.safeThumbSrc || item.thumbSrc || item.src);
   if (thumb) {
     const img = document.createElement("img");
     img.src = thumb;
@@ -1147,6 +1251,8 @@ function updateSphereTransform() {
   const sphere = document.querySelector(selectors.memorySphere);
   if (!sphere) return;
   const shell = sphere.closest(".memory-sphere");
+  state.sphere.rotationX = 0;
+  state.sphere.zoom = clamp(state.sphere.zoom, SPHERE_MIN_ZOOM, SPHERE_MAX_ZOOM);
   sphere.style.setProperty("--sphere-rotate-x", `${state.sphere.rotationX}deg`);
   sphere.style.setProperty("--sphere-rotate-y", `${state.sphere.rotationY}deg`);
   sphere.style.setProperty("--sphere-zoom", String(state.sphere.zoom));
@@ -1172,7 +1278,7 @@ function startSphereInertia() {
       return;
     }
 
-    state.sphere.rotationX = clamp(state.sphere.rotationX + state.sphere.velocityX, -46, 46);
+    state.sphere.rotationX = 0;
     state.sphere.rotationY += state.sphere.velocityY;
     updateSphereTransform();
     state.sphere.inertiaFrame = window.requestAnimationFrame(glide);
