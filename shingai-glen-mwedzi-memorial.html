@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Shingai Glen Mwedzi | In Loving Memory</title>
+    <meta name="description" content="A loving digital memorial for Shingai Glen Mwedzi, affectionately known as Murungu.">
+    <meta property="og:title" content="Shingai Glen Mwedzi | In Loving Memory">
+    <meta property="og:description" content="A quiet memorial of photos, videos, and remembered moments.">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="./images/murungu.jpeg">
+    <meta property="og:url" content="./shingai-glen-mwedzi-memorial.html">
+    <link rel="icon" href="./favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="./favicon-256.png">
+    <link rel="preload" as="image" href="./images/optimized/murungu-portrait.webp">
+    <link rel="preload" as="image" href="./images/optimized/murungu-backdrop.webp">
+    <link rel="stylesheet" href="./memorial-styles.css">
+    <script src="./memorial-app.js" defer></script>
+    <noscript>
+      <style>
+        .page-loader { display: none; }
+        .reveal { opacity: 1; transform: none; }
+      </style>
+    </noscript>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to memorial content</a>
+
+    <div class="page-loader" data-loader aria-live="polite">
+      <span>remembering...</span>
+    </div>
+
+    <header class="site-header" data-header>
+      <a class="brand" href="#hero" aria-label="Return to opening memorial">
+        <svg class="brand-mark" viewBox="0 0 64 64" role="img" aria-label="SGM memorial monogram">
+          <circle cx="32" cy="32" r="28"></circle>
+          <path d="M20 38c3.5 4 11.5 4.5 11.5-.5 0-7.5-13.5-3.5-13.5-12.5 0-7 9.5-8.5 14.5-4.5"></path>
+          <path d="M45 22c-7-4-16 .5-16 10 0 9.5 9.5 14 16 9v-8h-8"></path>
+        </svg>
+        <span>
+          <strong>SGM</strong>
+          <small>Murungu</small>
+        </span>
+      </a>
+
+      <nav class="primary-nav" aria-label="Memorial sections">
+        <a href="#gallery">Gallery</a>
+      </nav>
+
+    </header>
+
+    <main id="main">
+      <section class="hero memorial-section" id="hero" aria-labelledby="person-name">
+        <div class="hero-media" aria-hidden="true">
+          <img id="hero-image" src="./images/optimized/murungu-backdrop.webp" alt="">
+          <div class="film-grain"></div>
+        </div>
+        <div class="hero-composition">
+          <p class="eyebrow" id="memorial-subtitle">In loving memory</p>
+          <figure class="hero-portrait">
+            <img id="hero-portrait-image" src="./images/optimized/murungu-portrait.webp" alt="Portrait of Shingai Glen Mwedzi, Murungu" decoding="async" fetchpriority="high">
+          </figure>
+          <div class="hero-inner">
+            <h1 id="person-name">Shingai Glen Mwedzi</h1>
+            <p class="nickname" id="nickname">Murungu</p>
+            <dl class="memorial-dates" aria-label="Memorial dates">
+              <div>
+                <dt>Sunrise</dt>
+                <dd id="sunrise">11-12-1999</dd>
+              </div>
+              <div>
+                <dt>Sunset</dt>
+                <dd id="sunset">06-05-2026</dd>
+              </div>
+              <div>
+                <dt>Laid to rest</dt>
+                <dd id="laid-to-rest">09-05-2026</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+      </section>
+
+      <section class="section gallery-section reveal" id="gallery" aria-labelledby="gallery-title">
+        <h2 class="visually-hidden" id="gallery-title">Memorial Gallery</h2>
+
+        <div class="globe-control-deck" aria-label="Globe filters and controls">
+          <div class="globe-filters filter-tabs" role="group" aria-label="Filter globe media">
+            <button type="button" class="filter-tab is-active" data-filter="all" aria-pressed="true">All</button>
+            <button type="button" class="filter-tab" data-filter="photos" aria-pressed="false">Images</button>
+            <button type="button" class="filter-tab" data-filter="videos" aria-pressed="false">Videos</button>
+          </div>
+
+          <div class="sphere-toolbar" aria-label="Globe controls">
+            <button type="button" class="sphere-control" data-sphere-action="freeze" aria-pressed="false" title="Pause or resume the slow automatic rotation">Pause Motion</button>
+            <button type="button" class="sphere-control" data-sphere-action="zoom-out" title="Pull back to see more of the sphere">Zoom Out</button>
+            <button type="button" class="sphere-control" data-sphere-action="zoom-in" title="Move closer into the memory sphere">Zoom In</button>
+            <button type="button" class="sphere-control" data-sphere-action="snipe" title="Rotate to the next memory and highlight it">Focus Next</button>
+            <button type="button" class="sphere-control" data-sphere-action="open-focused" title="Open the currently focused memory">Open Focused</button>
+            <button type="button" class="sphere-control" data-sphere-action="spy" aria-pressed="true" title="Show or hide the enlarged hover preview">Hide Preview</button>
+            <button type="button" class="sphere-control" data-sphere-action="reset" title="Return the sphere to the full view">Reset View</button>
+          </div>
+        </div>
+
+        <div class="memory-sphere" aria-label="Rotatable spherical mosaic of remembered moments">
+          <div class="memory-sphere__halo" aria-hidden="true"></div>
+          <div class="memory-sphere__stage" id="memory-sphere" role="group" tabindex="0" aria-label="Rotatable memorial globe. Use arrow keys or drag to rotate."></div>
+          <div class="sphere-spy" id="sphere-spy" hidden aria-live="polite"></div>
+        </div>
+
+        <button class="gallery-reveal-band" type="button" id="gallery-reveal" aria-expanded="false" aria-controls="gallery-panel">
+          <span>Open Full Gallery</span>
+          <small id="gallery-reveal-count">All memories</small>
+        </button>
+
+        <div class="gallery-panel" id="gallery-panel" hidden>
+          <div class="gallery-tools" aria-label="Gallery filters">
+            <p class="archive-note" id="archive-note" aria-live="polite"></p>
+          </div>
+
+          <div class="gallery-grid" id="gallery-grid" aria-live="polite"></div>
+          <div class="empty-state" id="gallery-empty" hidden>
+            <p>No media has been listed yet. Add filenames from the <code>./images</code> folder in <code>memorial-app.js</code>.</p>
+          </div>
+          <div class="gallery-more">
+            <button class="quiet-button" type="button" id="show-more-media" hidden>Show More Memories</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="closing-tribute" id="closing" aria-labelledby="closing-title">
+        <div class="closing-inner reveal">
+          <p class="section-kicker">Always remembered</p>
+          <h2 id="closing-title">Shingai Glen Mwedzi</h2>
+          <p id="closing-message"></p>
+          <p class="closing-dates" id="closing-dates"></p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>Made as a living remembrance for Shingai Glen Mwedzi, Murungu.</p>
+    </footer>
+
+    <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-labelledby="lightbox-title" hidden>
+      <div class="lightbox-backdrop" data-close-lightbox></div>
+      <div class="lightbox-panel">
+        <button class="lightbox-close" type="button" data-close-lightbox aria-label="Close memory viewer">Close</button>
+        <button class="lightbox-nav lightbox-nav--prev" type="button" data-lightbox-prev aria-label="Previous memory">Prev</button>
+        <div class="lightbox-stage" id="lightbox-stage"></div>
+        <button class="lightbox-nav lightbox-nav--next" type="button" data-lightbox-next aria-label="Next memory">Next</button>
+        <div class="lightbox-caption" hidden>
+          <p class="media-date" id="lightbox-date"></p>
+          <h2 id="lightbox-title">Memory</h2>
+          <p id="lightbox-caption"></p>
+          <p class="transcript" id="lightbox-transcript" hidden></p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

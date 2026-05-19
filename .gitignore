@@ -1,0 +1,7 @@
+venv/
+.env
+__pycache__/
+images/*.HEIC
+images/*.heic
+images/*.HEIF
+images/*.heif
