@@ -110,20 +110,21 @@
 
         <button class="gallery-reveal-band" type="button" id="gallery-reveal" aria-expanded="false" aria-controls="gallery-panel">
           <span>Open Full Gallery</span>
-          <small id="gallery-reveal-count">All memories</small>
         </button>
 
         <div class="gallery-panel" id="gallery-panel" hidden>
-          <div class="gallery-tools" aria-label="Gallery filters">
-            <p class="archive-note" id="archive-note" aria-live="polite"></p>
-          </div>
+          <section class="gallery-subsection" id="images-gallery-section" aria-labelledby="images-gallery-title">
+            <h3 id="images-gallery-title">Images</h3>
+            <div class="gallery-grid" id="gallery-images-grid" aria-live="polite"></div>
+          </section>
 
-          <div class="gallery-grid" id="gallery-grid" aria-live="polite"></div>
+          <section class="gallery-subsection" id="videos-gallery-section" aria-labelledby="videos-gallery-title">
+            <h3 id="videos-gallery-title">Videos</h3>
+            <div class="gallery-grid" id="gallery-videos-grid" aria-live="polite"></div>
+          </section>
+
           <div class="empty-state" id="gallery-empty" hidden>
             <p>No media has been listed yet. Add filenames from the <code>./images</code> folder in <code>memorial-app.js</code>.</p>
-          </div>
-          <div class="gallery-more">
-            <button class="quiet-button" type="button" id="show-more-media" hidden>Show More Memories</button>
           </div>
         </div>
       </section>

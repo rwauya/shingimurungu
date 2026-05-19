@@ -377,11 +377,11 @@ const selectors = {
   sphereSpy: "#sphere-spy",
   galleryPanel: "#gallery-panel",
   galleryReveal: "#gallery-reveal",
-  galleryRevealCount: "#gallery-reveal-count",
-  galleryGrid: "#gallery-grid",
+  galleryImagesGrid: "#gallery-images-grid",
+  galleryVideosGrid: "#gallery-videos-grid",
+  galleryImagesSection: "#images-gallery-section",
+  galleryVideosSection: "#videos-gallery-section",
   galleryEmpty: "#gallery-empty",
-  archiveNote: "#archive-note",
-  showMore: "#show-more-media",
   filterTabs: ".filter-tab",
   closingMessage: "#closing-message",
   closingDates: "#closing-dates",
@@ -446,8 +446,6 @@ function applyMemorialData() {
   setText(selectors.laidToRest, memorialData.laidToRest);
   setText(selectors.closingMessage, memorialData.closingMessage);
   setText(selectors.closingDates, `${memorialData.sunrise} - ${memorialData.sunset}`);
-  updateGalleryRevealCount();
-
   const heroImage = document.querySelector(selectors.heroImage);
   if (heroImage) {
     heroImage.src = memorialData.heroImage;
@@ -493,7 +491,7 @@ function renderMemorySphere() {
   sphereItems.forEach((item, index) => {
     const tile = document.createElement("button");
     const cell = metrics.cells[index];
-    tile.className = "sphere-tile";
+    tile.className = `sphere-tile${item.type === "video" ? " sphere-tile--video" : ""}`;
     tile.type = "button";
     tile.dataset.src = item.src;
     tile.dataset.index = String(index);
@@ -583,7 +581,7 @@ function createSphereSurfaceCells(total, radius) {
 
   const cells = [];
   const rowHeight = (Math.PI * radius) / rowCount;
-  const fillRatio = total > 1200 ? 0.985 : 0.965;
+  const fillRatio = total > 1200 ? 0.93 : 0.86;
   rowCounts.forEach((columns, row) => {
     const latitude = -Math.PI / 2 + ((row + 0.5) / rowCount) * Math.PI;
     const circumference = Math.max(2 * Math.PI * radius * Math.cos(latitude), rowHeight * 1.2);
