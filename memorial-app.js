@@ -1,19 +1,19 @@
 /*
   HOW TO ADD MY OWN PHOTOS AND VIDEOS
 
-  Browser security does not allow a local HTML file to automatically read every
-  filename inside ./images. To add media, list each filename in the editable
-  memorialData.mediaItems array below using this pattern:
+  Browser security does not allow a static HTML file to edit files or watch a
+  folder by itself. The site reads ./media-manifest.js, which is generated from
+  the real files in ./images by running:
 
-    media("your-photo.jpg")
-    media("your-video.mp4", { title: "A remembered afternoon", caption: "Optional caption." })
+    .\venv\Scripts\python.exe tools\sync_media_manifest.py
 
-  Keep files inside the ./images folder. The media() helper automatically turns
-  "your-photo.jpg" into "./images/your-photo.jpg" and detects the type from the
-  extension. Supported photo formats include JPG, JPEG, PNG, WEBP, HEIC, and
-  HEIF. Supported video formats include MP4, WEBM, MOV, and M4V. HEIC and MOV
-  support depends on the visitor's browser, so the page shows a refined fallback
-  link instead of broken media when needed.
+  To keep it updated while adding/removing files locally, run:
+
+    .\venv\Scripts\python.exe tools\sync_media_manifest.py --watch
+
+  Keep files inside the ./images folder. Use memorialData.mediaItems below only
+  for optional titles/captions/metadata; if media-manifest.js exists, only files
+  currently present in the manifest are displayed.
 */
 
 function media(filename, details = {}) {
@@ -43,6 +43,14 @@ function getExtension(src) {
   const clean = src.split("?")[0].split("#")[0];
   const match = clean.match(/\.([a-z0-9]+)$/i);
   return match ? match[1].toLowerCase() : "";
+}
+
+function sourceKey(src) {
+  return String(src || "")
+    .replace(/\\/g, "/")
+    .replace(/^\.?\/*images\//, "")
+    .replace(/^\.?\//, "")
+    .trim();
 }
 
 function detectMediaType(src) {
@@ -97,7 +105,7 @@ function posterSrcFor(filename, type) {
 }
 
 function titleFromFilename(filename, type) {
-  const clean = filename.replace(/^\.\/images\//, "");
+  const clean = sourceKey(filename);
   if (/murungu/i.test(clean)) return "Murungu";
   if (/^VIDEO-/i.test(clean)) return "Video Remembrance";
   if (/^PHOTO-/i.test(clean)) return "Family Photograph";
@@ -430,7 +438,7 @@ document.addEventListener("DOMContentLoaded", init);
 
 function init() {
   try {
-    mediaItems = normaliseMediaItems(memorialData.mediaItems);
+    mediaItems = normaliseMediaItems(resolveMediaItems());
     applyMemorialData();
     renderMemorySphere();
     renderGallery();
@@ -468,6 +476,30 @@ function normaliseMediaItems(items) {
         posterSrc: normalised.posterSrc || posterSrcFor(normalised.src, normalised.type)
       };
     });
+}
+
+function resolveMediaItems() {
+  const manifest = Array.isArray(window.memorialMediaManifest) ? window.memorialMediaManifest : [];
+  if (!manifest.length) return memorialData.mediaItems;
+
+  const metadataBySource = new Map(
+    memorialData.mediaItems
+      .filter(Boolean)
+      .map((item) => {
+        const normalised = typeof item === "string" ? media(item) : item;
+        return [sourceKey(normalised.src), normalised];
+      })
+  );
+
+  return manifest
+    .map((entry) => {
+      const filename = typeof entry === "string" ? entry : (entry.filename || entry.src || "");
+      const key = sourceKey(filename);
+      if (!key) return null;
+      const details = metadataBySource.get(key) || {};
+      return media(key, { ...details, ...(typeof entry === "object" ? entry : {}) });
+    })
+    .filter(Boolean);
 }
 
 function applyMemorialData() {
