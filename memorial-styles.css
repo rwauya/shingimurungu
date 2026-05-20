@@ -618,6 +618,34 @@ figcaption,
   color: var(--ink);
 }
 
+.sphere-hand-pad {
+  width: min(720px, 100%);
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.45rem;
+  justify-content: center;
+}
+
+.sphere-hand-pad[hidden] {
+  display: none;
+}
+
+.sphere-hand-pad button {
+  min-height: 38px;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.sphere-hand-pad button:hover {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--line));
+  color: var(--ink);
+}
+
 .filter-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -679,7 +707,7 @@ figcaption,
   cursor: grab;
   transform-style: preserve-3d;
   transform-origin: 50% 50%;
-  transform: translate(-50%, -50%) scale(var(--sphere-zoom, 0.72)) rotateX(var(--sphere-rotate-x, 0deg)) rotateY(var(--sphere-rotate-y, 0deg));
+  transform: translate(-50%, -50%) scale(var(--sphere-zoom, 0.72)) rotateZ(var(--sphere-rotate-z, 0deg)) rotateX(var(--sphere-rotate-x, 0deg)) rotateY(var(--sphere-rotate-y, 0deg));
   transition: transform 120ms ease-out;
 }
 
@@ -1011,6 +1039,16 @@ figcaption,
   border-left: 14px solid rgba(255, 248, 236, 0.95);
   transform: translate(-32%, -50%);
   pointer-events: none;
+}
+
+.sphere-tile--video::before,
+.sphere-tile--video::after,
+.sphere-preview-card.is-video::before,
+.sphere-preview-card.is-video::after,
+.media-card.is-video .media-frame::before,
+.media-card.is-video .media-frame::after {
+  content: none;
+  display: none;
 }
 
 .media-fallback {

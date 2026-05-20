@@ -360,11 +360,13 @@ const state = {
   sphere: {
     rotationX: 0,
     rotationY: 0,
+    rotationZ: 0,
     zoom: 0.72,
     baseZoom: 0.72,
     userZoomed: false,
     focusIndex: 0,
     spyMode: true,
+    handTool: false,
     frozen: false,
     dragging: false,
     velocityX: 0,
@@ -905,6 +907,7 @@ function bindInteractions() {
       state.currentFilter = button.dataset.filter || "all";
       state.sphere.rotationX = 0;
       state.sphere.rotationY = 0;
+      state.sphere.rotationZ = 0;
       state.sphere.focusIndex = 0;
       state.sphere.userZoomed = false;
       cancelSphereInertia();
@@ -934,6 +937,7 @@ function bindInteractions() {
   document.addEventListener("keydown", handleKeyboard);
   bindGalleryReveal();
   bindSphereToolbar();
+  bindHandControls();
   bindSphereControls();
   startSphereDrift();
 }
@@ -976,13 +980,19 @@ function handleSphereAction(action, button) {
     state.sphere.zoom = clamp(state.sphere.zoom - 0.1, SPHERE_MIN_ZOOM, SPHERE_MAX_ZOOM);
     state.sphere.userZoomed = true;
   }
+  if (action === "hand-tool") {
+    setHandTool(!state.sphere.handTool, button);
+    return;
+  }
   if (action === "reset") {
     cancelSphereInertia();
     state.sphere.rotationX = 0;
     state.sphere.rotationY = 0;
+    state.sphere.rotationZ = 0;
     state.sphere.zoom = state.sphere.baseZoom || 0.72;
     state.sphere.userZoomed = false;
     state.sphere.focusIndex = 0;
+    setHandTool(false);
     clearSphereFocus();
     renderSphereSpy(null);
   }
@@ -1059,9 +1069,14 @@ function bindSphereControls() {
     state.sphere.lastY = event.clientY;
     if (Math.hypot(totalX, totalY) > 14) state.sphere.moved = true;
     state.sphere.velocityY = deltaX * 0.28;
-    state.sphere.velocityX = 0;
+    state.sphere.velocityX = state.sphere.handTool ? -deltaY * 0.22 : 0;
     state.sphere.rotationY += state.sphere.velocityY;
-    state.sphere.rotationX = 0;
+    if (state.sphere.handTool) {
+      state.sphere.rotationX = clamp(state.sphere.rotationX + state.sphere.velocityX, -58, 58);
+    } else {
+      state.sphere.rotationX = 0;
+      state.sphere.rotationZ = 0;
+    }
     state.sphere.lastInteraction = performance.now();
     updateSphereTransform();
   });
@@ -1135,10 +1150,54 @@ function bindSphereControls() {
     event.preventDefault();
     if (event.key === "ArrowLeft") state.sphere.rotationY -= step;
     if (event.key === "ArrowRight") state.sphere.rotationY += step;
-    if (event.key === "ArrowUp" || event.key === "ArrowDown") state.sphere.rotationX = 0;
+    if (event.key === "ArrowUp") {
+      state.sphere.rotationX = state.sphere.handTool ? clamp(state.sphere.rotationX - step, -58, 58) : 0;
+    }
+    if (event.key === "ArrowDown") {
+      state.sphere.rotationX = state.sphere.handTool ? clamp(state.sphere.rotationX + step, -58, 58) : 0;
+    }
     state.sphere.lastInteraction = performance.now();
     updateSphereTransform();
   });
+}
+
+function bindHandControls() {
+  document.querySelectorAll("[data-sphere-hand]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setHandTool(true);
+      applyHandRotation(button.dataset.sphereHand || "");
+    });
+  });
+}
+
+function setHandTool(enabled, controlButton) {
+  state.sphere.handTool = Boolean(enabled);
+  const button = controlButton || document.querySelector('[data-sphere-action="hand-tool"]');
+  const pad = document.querySelector("#sphere-hand-pad");
+  if (button) {
+    button.setAttribute("aria-pressed", String(state.sphere.handTool));
+    button.textContent = state.sphere.handTool ? "Hand Active" : "Hand Tool";
+  }
+  if (pad) pad.hidden = !state.sphere.handTool;
+  if (!state.sphere.handTool) {
+    state.sphere.rotationX = 0;
+    state.sphere.rotationZ = 0;
+  }
+  state.sphere.lastInteraction = performance.now();
+  updateSphereTransform();
+}
+
+function applyHandRotation(direction) {
+  const step = 12;
+  cancelSphereInertia();
+  if (direction === "left") state.sphere.rotationY -= step;
+  if (direction === "right") state.sphere.rotationY += step;
+  if (direction === "up") state.sphere.rotationX = clamp(state.sphere.rotationX - step, -58, 58);
+  if (direction === "down") state.sphere.rotationX = clamp(state.sphere.rotationX + step, -58, 58);
+  if (direction === "roll-left") state.sphere.rotationZ -= step;
+  if (direction === "roll-right") state.sphere.rotationZ += step;
+  state.sphere.lastInteraction = performance.now();
+  updateSphereTransform();
 }
 
 function focusSphereItem(index, showPanel) {
@@ -1150,6 +1209,7 @@ function focusSphereItem(index, showPanel) {
   if (position) {
     state.sphere.rotationY = -position.rotateY;
     state.sphere.rotationX = 0;
+    state.sphere.rotationZ = 0;
     state.sphere.zoom = clamp(Math.max(state.sphere.zoom, SPHERE_FOCUS_ZOOM), SPHERE_MIN_ZOOM, SPHERE_MAX_ZOOM);
     state.sphere.userZoomed = true;
   }
@@ -1251,10 +1311,16 @@ function updateSphereTransform() {
   const sphere = document.querySelector(selectors.memorySphere);
   if (!sphere) return;
   const shell = sphere.closest(".memory-sphere");
-  state.sphere.rotationX = 0;
+  if (!state.sphere.handTool) {
+    state.sphere.rotationX = 0;
+    state.sphere.rotationZ = 0;
+  } else {
+    state.sphere.rotationX = clamp(state.sphere.rotationX, -58, 58);
+  }
   state.sphere.zoom = clamp(state.sphere.zoom, SPHERE_MIN_ZOOM, SPHERE_MAX_ZOOM);
   sphere.style.setProperty("--sphere-rotate-x", `${state.sphere.rotationX}deg`);
   sphere.style.setProperty("--sphere-rotate-y", `${state.sphere.rotationY}deg`);
+  sphere.style.setProperty("--sphere-rotate-z", `${state.sphere.rotationZ}deg`);
   sphere.style.setProperty("--sphere-zoom", String(state.sphere.zoom));
   if (shell) {
     const stageSize = Number.parseFloat(getComputedStyle(shell).getPropertyValue("--sphere-diameter")) || 980;
@@ -1278,8 +1344,13 @@ function startSphereInertia() {
       return;
     }
 
-    state.sphere.rotationX = 0;
     state.sphere.rotationY += state.sphere.velocityY;
+    if (state.sphere.handTool) {
+      state.sphere.rotationX = clamp(state.sphere.rotationX + state.sphere.velocityX, -58, 58);
+    } else {
+      state.sphere.rotationX = 0;
+      state.sphere.rotationZ = 0;
+    }
     updateSphereTransform();
     state.sphere.inertiaFrame = window.requestAnimationFrame(glide);
   };
