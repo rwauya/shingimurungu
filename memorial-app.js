@@ -174,8 +174,6 @@ const memorialData = {
     media("IMG_6707.JPG"),
     media("IMG_6708.JPG"),
     media("IMG_6709.JPG"),
-    media("converted/IMG_6873.jpg"),
-    media("converted/IMG_6888.jpg"),
     media("converted/IMG_7003.jpg"),
     media("converted/IMG_7004.jpg"),
     media("converted/IMG_7005.jpg"),
@@ -1068,6 +1066,7 @@ function bindInteractions() {
     updateViewportSizeVars();
     state.sphere.userZoomed = false;
     renderMemorySphere();
+    updateRevealButtons();
     if (getDeviceProfile().mobile) cancelSphereDrift();
     else startSphereDrift();
   }, 180);
@@ -1109,12 +1108,13 @@ function bindGalleryReveal() {
   const panel = document.querySelector(selectors.galleryPanel);
   if (!reveal || !videosReveal || !panel) return;
 
+  updateRevealButtons();
+
   reveal.addEventListener("click", () => {
     state.galleryExpanded = !state.galleryExpanded;
     panel.hidden = !(state.galleryExpanded || state.videosExpanded);
     reveal.setAttribute("aria-expanded", String(state.galleryExpanded));
-    const label = reveal.querySelector("span");
-    if (label) label.textContent = state.galleryExpanded ? "Close Gallery" : "Open Gallery";
+    updateRevealButtons();
     renderGallery();
   });
 
@@ -1122,10 +1122,29 @@ function bindGalleryReveal() {
     state.videosExpanded = !state.videosExpanded;
     panel.hidden = !(state.galleryExpanded || state.videosExpanded);
     videosReveal.setAttribute("aria-expanded", String(state.videosExpanded));
-    const label = videosReveal.querySelector("span");
-    if (label) label.textContent = state.videosExpanded ? "Close Videos" : "Open Videos";
+    updateRevealButtons();
     renderGallery();
   });
+}
+
+function updateRevealButtons() {
+  const reveal = document.querySelector(selectors.galleryReveal);
+  const videosReveal = document.querySelector(selectors.videosReveal);
+  const mobile = getDeviceProfile().mobile;
+  if (reveal) {
+    const label = reveal.querySelector("span");
+    const text = state.galleryExpanded
+      ? (mobile ? "Close Images" : "Close Gallery")
+      : (mobile ? "Open Images" : "Open Gallery");
+    if (label) label.textContent = text;
+    reveal.setAttribute("aria-label", text);
+  }
+  if (videosReveal) {
+    const label = videosReveal.querySelector("span");
+    const text = state.videosExpanded ? "Close Videos" : "Open Videos";
+    if (label) label.textContent = text;
+    videosReveal.setAttribute("aria-label", text);
+  }
 }
 
 function bindSphereControls() {

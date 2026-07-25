@@ -4,8 +4,6 @@ window.memorialMediaManifest = [
   "494c7170-be10-490d-83fe-19508d037b28.MP4",
   "657c48e9-89f1-41c0-9593-b27c272b5964.MP4",
   "b6cb800d-1ab1-4a9d-8439-fcf241bd4870.MP4",
-  "converted/IMG_6873.jpg",
-  "converted/IMG_6888.jpg",
   "converted/IMG_7003.jpg",
   "converted/IMG_7004.jpg",
   "converted/IMG_7006.jpg",
