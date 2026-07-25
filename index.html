@@ -91,9 +91,14 @@
           <div class="sphere-spy" id="sphere-spy" hidden aria-live="polite"></div>
         </div>
 
-        <button class="gallery-reveal-band" type="button" id="gallery-reveal" aria-expanded="false" aria-controls="gallery-panel">
-          <span>Open Full Gallery</span>
-        </button>
+        <div class="gallery-reveal-actions" aria-label="Open memorial media sections">
+          <button class="gallery-reveal-band" type="button" id="gallery-reveal" aria-expanded="false" aria-controls="images-gallery-section">
+            <span>Open Gallery</span>
+          </button>
+          <button class="gallery-reveal-band" type="button" id="videos-reveal" aria-expanded="false" aria-controls="videos-gallery-section">
+            <span>Open Videos</span>
+          </button>
+        </div>
 
         <div class="gallery-panel" id="gallery-panel" hidden>
           <section class="gallery-subsection" id="images-gallery-section" aria-labelledby="images-gallery-title">

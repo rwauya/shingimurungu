@@ -354,6 +354,7 @@ const memorialData = {
 const state = {
   currentFilter: "all",
   galleryExpanded: false,
+  videosExpanded: false,
   galleryRenderToken: 0,
   lightboxItems: [],
   lightboxIndex: 0,
@@ -368,7 +369,7 @@ const state = {
     focusIndex: 0,
     spyMode: true,
     handTool: true,
-    frozen: true,
+    frozen: false,
     metrics: null,
     dragging: false,
     velocityX: 0,
@@ -412,6 +413,7 @@ const selectors = {
   sphereSpy: "#sphere-spy",
   galleryPanel: "#gallery-panel",
   galleryReveal: "#gallery-reveal",
+  videosReveal: "#videos-reveal",
   galleryImagesGrid: "#gallery-images-grid",
   galleryVideosGrid: "#gallery-videos-grid",
   galleryImagesSection: "#images-gallery-section",
@@ -534,11 +536,24 @@ function setText(selector, text) {
 function renderMemorySphere() {
   const sphere = document.querySelector(selectors.memorySphere);
   if (!sphere) return;
+  const profile = getDeviceProfile();
+  const shell = sphere.closest(".memory-sphere");
 
   sphere.replaceChildren();
+  if (profile.mobile) {
+    if (shell) shell.hidden = true;
+    state.sphere.items = [];
+    state.sphere.positions = [];
+    state.sphere.metrics = null;
+    renderSphereSpy(null);
+    cancelSphereInertia();
+    cancelSphereDrift();
+    return;
+  }
+
+  if (shell) shell.hidden = false;
   const sourceItems = getGalleryMedia();
   const sphereItems = getSphereDisplayItems(sourceItems);
-  const shell = sphere.closest(".memory-sphere");
   const metrics = getSphereMetrics(sphereItems.length, shell);
   const fragment = document.createDocumentFragment();
   state.sphere.items = sphereItems;
@@ -825,15 +840,19 @@ function renderGallery() {
   state.galleryRenderToken = token;
   const images = mediaItems.filter((item) => item.type === "image");
   const videos = mediaItems.filter((item) => item.type === "video");
+  const hasOpenSection = state.galleryExpanded || state.videosExpanded;
   imagesGrid.replaceChildren();
   videosGrid.replaceChildren();
 
-  empty.hidden = (images.length + videos.length) !== 0 || !state.galleryExpanded;
+  empty.hidden = (images.length + videos.length) !== 0 || !hasOpenSection;
   imagesSection.hidden = images.length === 0 || !state.galleryExpanded;
-  videosSection.hidden = videos.length === 0 || !state.galleryExpanded;
+  videosSection.hidden = videos.length === 0 || !state.videosExpanded;
 
   if (state.galleryExpanded) {
     appendGalleryBatch(imagesGrid, images, images, token);
+  }
+
+  if (state.videosExpanded) {
     appendGalleryBatch(videosGrid, videos, videos, token);
   }
 }
@@ -841,7 +860,7 @@ function renderGallery() {
 function appendGalleryBatch(grid, items, lightboxScope, token, start = 0) {
   if (!items.length || token !== state.galleryRenderToken) return;
 
-  const end = Math.min(start + GALLERY_BATCH_SIZE, items.length);
+  const end = Math.min(start + getGalleryBatchSize(), items.length);
   const fragment = document.createDocumentFragment();
   for (let index = start; index < end; index += 1) {
     fragment.append(createGalleryCard(items[index], lightboxScope));
@@ -851,6 +870,10 @@ function appendGalleryBatch(grid, items, lightboxScope, token, start = 0) {
   if (end < items.length) {
     scheduleIdleWork(() => appendGalleryBatch(grid, items, lightboxScope, token, end));
   }
+}
+
+function getGalleryBatchSize() {
+  return getDeviceProfile().mobile ? Math.max(16, Math.min(28, GALLERY_BATCH_SIZE)) : GALLERY_BATCH_SIZE;
 }
 
 function scheduleIdleWork(callback) {
@@ -1045,6 +1068,8 @@ function bindInteractions() {
     updateViewportSizeVars();
     state.sphere.userZoomed = false;
     renderMemorySphere();
+    if (getDeviceProfile().mobile) cancelSphereDrift();
+    else startSphereDrift();
   }, 180);
 
   window.addEventListener("resize", handleViewportChange, { passive: true });
@@ -1080,15 +1105,25 @@ function bindInteractions() {
 
 function bindGalleryReveal() {
   const reveal = document.querySelector(selectors.galleryReveal);
+  const videosReveal = document.querySelector(selectors.videosReveal);
   const panel = document.querySelector(selectors.galleryPanel);
-  if (!reveal || !panel) return;
+  if (!reveal || !videosReveal || !panel) return;
 
   reveal.addEventListener("click", () => {
     state.galleryExpanded = !state.galleryExpanded;
-    panel.hidden = !state.galleryExpanded;
+    panel.hidden = !(state.galleryExpanded || state.videosExpanded);
     reveal.setAttribute("aria-expanded", String(state.galleryExpanded));
     const label = reveal.querySelector("span");
-    if (label) label.textContent = state.galleryExpanded ? "Close Full Gallery" : "Open Full Gallery";
+    if (label) label.textContent = state.galleryExpanded ? "Close Gallery" : "Open Gallery";
+    renderGallery();
+  });
+
+  videosReveal.addEventListener("click", () => {
+    state.videosExpanded = !state.videosExpanded;
+    panel.hidden = !(state.galleryExpanded || state.videosExpanded);
+    videosReveal.setAttribute("aria-expanded", String(state.videosExpanded));
+    const label = videosReveal.querySelector("span");
+    if (label) label.textContent = state.videosExpanded ? "Close Videos" : "Open Videos";
     renderGallery();
   });
 }
@@ -1383,10 +1418,17 @@ function cancelSphereInertia() {
   }
 }
 
+function cancelSphereDrift() {
+  if (state.sphere.idleFrame) {
+    window.cancelAnimationFrame(state.sphere.idleFrame);
+    state.sphere.idleFrame = 0;
+  }
+}
+
 function startSphereDrift() {
   const sphere = document.querySelector(selectors.memorySphere);
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (!sphere || reduceMotion || state.sphere.frozen) return;
+  if (!sphere || reduceMotion || state.sphere.frozen || getDeviceProfile().mobile) return;
 
   const drift = (time) => {
     if (!state.sphere.frozen && !state.sphere.dragging && !state.sphere.inertiaFrame && time - state.sphere.lastInteraction > 1800) {
