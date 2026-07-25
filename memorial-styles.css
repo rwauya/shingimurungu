@@ -1154,6 +1154,256 @@ figcaption,
     grid-column: span 2;
     grid-row: span 2;
   }
+
+  .gallery-section {
+    width: min(1800px, calc(100% - 3rem));
+    padding-top: var(--space-5);
+  }
+
+  .gallery-subsection h3 {
+    display: none;
+  }
+
+  .memory-sphere--mosaic {
+    width: min(1700px, 100%);
+    height: var(--sphere-view-height, 900px);
+    margin-bottom: clamp(1.5rem, 4vw, 3.25rem);
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--line));
+    border-radius: var(--radius-md);
+    background:
+      linear-gradient(180deg, rgba(255, 248, 236, 0.07), rgba(255, 248, 236, 0.018)),
+      linear-gradient(90deg, rgba(143, 169, 147, 0.12), transparent 30%, rgba(169, 77, 67, 0.11) 100%),
+      var(--paper-soft);
+    box-shadow:
+      0 36px 110px rgba(0, 0, 0, 0.5),
+      inset 0 1px 0 rgba(255, 248, 236, 0.09);
+    perspective: 1350px;
+    perspective-origin: 50% 42%;
+  }
+
+  .memory-sphere--mosaic::before,
+  .memory-sphere--mosaic::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .memory-sphere--mosaic::before {
+    opacity: 0.28;
+    background-image:
+      linear-gradient(rgba(255, 248, 236, 0.11) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 248, 236, 0.09) 1px, transparent 1px);
+    background-size: 86px 86px;
+    mask-image: linear-gradient(180deg, transparent, #000 16%, #000 84%, transparent);
+  }
+
+  .memory-sphere--mosaic::after {
+    background:
+      linear-gradient(180deg, rgba(18, 17, 14, 0.24), transparent 22%, transparent 72%, rgba(18, 17, 14, 0.42)),
+      linear-gradient(90deg, rgba(18, 17, 14, 0.5), transparent 18%, transparent 82%, rgba(18, 17, 14, 0.5));
+  }
+
+  .memory-sphere--mosaic .memory-sphere__halo {
+    inset: 1.1rem;
+    left: auto;
+    top: auto;
+    width: auto;
+    aspect-ratio: auto;
+    border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+    border-radius: var(--radius-md);
+    transform: none;
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 248, 236, 0.05),
+      inset 0 0 90px rgba(193, 161, 101, 0.07);
+  }
+
+  .memory-sphere--mosaic .memory-sphere__stage {
+    left: 50%;
+    top: 50%;
+    z-index: 2;
+    width: min(var(--sphere-stage-size, 1320px), calc(100% - 4rem));
+    height: min(var(--mosaic-stage-height, 720px), calc(100% - 4rem));
+    aspect-ratio: auto;
+    display: grid;
+    grid-template-columns: repeat(var(--mosaic-columns, 12), minmax(0, 1fr));
+    grid-auto-rows: var(--mosaic-row-height, 92px);
+    grid-auto-flow: dense;
+    gap: var(--mosaic-gap, 10px);
+    align-content: center;
+    cursor: grab;
+    transform-style: flat;
+    transform:
+      translate(-50%, -50%)
+      rotateX(var(--mosaic-tilt-x, 0deg))
+      rotateY(var(--mosaic-tilt-y, 0deg))
+      scale(var(--sphere-zoom, 1));
+    transition: transform 170ms ease-out;
+  }
+
+  .memory-sphere--mosaic .sphere-tile {
+    position: relative;
+    left: auto;
+    top: auto;
+    z-index: 1;
+    width: auto;
+    height: auto;
+    min-height: 0;
+    grid-column: span var(--mosaic-col-span, 1);
+    grid-row: span var(--mosaic-row-span, 1);
+    border-color: rgba(255, 248, 236, 0.2);
+    border-radius: var(--radius-xs);
+    background: color-mix(in srgb, var(--surface-muted) 82%, var(--paper));
+    box-shadow:
+      0 15px 26px rgba(0, 0, 0, 0.36),
+      0 2px 7px rgba(0, 0, 0, 0.28),
+      inset 0 1px 0 rgba(255, 248, 236, 0.1);
+    opacity: 0;
+    transform:
+      translateY(var(--mosaic-shift, 0px))
+      rotateX(var(--mosaic-rotate-x, 0deg))
+      rotateY(var(--mosaic-rotate-y, 0deg))
+      rotateZ(var(--mosaic-rotate-z, 0deg));
+    transition:
+      transform 260ms ease,
+      border-color 260ms ease,
+      box-shadow 260ms ease,
+      filter 260ms ease;
+    animation: mosaicTileSettle 680ms ease forwards;
+    animation-delay: var(--mosaic-delay, 0ms);
+  }
+
+  .memory-sphere--mosaic .sphere-tile::before,
+  .memory-sphere--mosaic .sphere-tile::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+  }
+
+  .memory-sphere--mosaic .sphere-tile::before {
+    inset: 0;
+    z-index: 2;
+    border-radius: inherit;
+    background:
+      linear-gradient(135deg, rgba(255, 248, 236, 0.18), transparent 34%),
+      linear-gradient(180deg, transparent 58%, rgba(0, 0, 0, 0.28));
+    opacity: 0.36;
+    mix-blend-mode: soft-light;
+  }
+
+  .memory-sphere--mosaic .sphere-tile::after {
+    left: 9%;
+    right: 9%;
+    bottom: -14px;
+    height: 18px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.42);
+    filter: blur(13px);
+  }
+
+  .memory-sphere--mosaic .sphere-tile__skin {
+    position: relative;
+    transform: translateZ(0);
+    background:
+      linear-gradient(180deg, rgba(255, 248, 236, 0.07), rgba(255, 248, 236, 0.015)),
+      var(--surface-muted);
+  }
+
+  .memory-sphere--mosaic .sphere-tile img,
+  .memory-sphere--mosaic .sphere-tile__skin img {
+    filter: contrast(1.04) saturate(1.02);
+    transition: transform 520ms ease, filter 520ms ease;
+  }
+
+  .memory-sphere--mosaic .sphere-tile--feature {
+    border-color: color-mix(in srgb, var(--accent) 64%, rgba(255, 248, 236, 0.24));
+    box-shadow:
+      0 24px 52px rgba(0, 0, 0, 0.42),
+      0 4px 16px rgba(193, 161, 101, 0.12),
+      inset 0 1px 0 rgba(255, 248, 236, 0.13);
+  }
+
+  .memory-sphere--mosaic .sphere-tile--video .sphere-tile__skin::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 0;
+    height: 0;
+    border-top: 13px solid transparent;
+    border-bottom: 13px solid transparent;
+    border-left: 19px solid rgba(255, 248, 236, 0.88);
+    filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.45));
+    transform: translate(-38%, -50%);
+  }
+
+  .memory-sphere--mosaic .sphere-tile:hover,
+  .memory-sphere--mosaic .sphere-tile:focus-visible {
+    z-index: 8;
+    border-color: rgba(255, 248, 236, 0.78);
+    box-shadow:
+      0 34px 76px rgba(0, 0, 0, 0.56),
+      0 8px 26px rgba(193, 161, 101, 0.15),
+      inset 0 1px 0 rgba(255, 248, 236, 0.18);
+    filter: brightness(1.07);
+    transform:
+      translateY(calc(var(--mosaic-shift, 0px) - 8px))
+      rotateX(var(--mosaic-rotate-x, 0deg))
+      rotateY(var(--mosaic-rotate-y, 0deg))
+      rotateZ(var(--mosaic-rotate-z, 0deg))
+      scale(1.035);
+  }
+
+  .memory-sphere--mosaic .sphere-tile:hover img,
+  .memory-sphere--mosaic .sphere-tile:focus-visible img {
+    transform: scale(1.035);
+    filter: contrast(1.08) saturate(1.06);
+  }
+
+  .memory-sphere--mosaic .sphere-spy {
+    z-index: 14;
+  }
+
+  .memory-sphere--mosaic .sphere-preview-card {
+    border-color: color-mix(in srgb, var(--accent) 48%, rgba(255, 248, 236, 0.26));
+    box-shadow:
+      0 36px 100px rgba(0, 0, 0, 0.6),
+      inset 0 1px 0 rgba(255, 248, 236, 0.12);
+  }
+
+  .memory-sphere--mosaic + .gallery-reveal-actions {
+    margin-top: 0;
+  }
+
+  .gallery-reveal-actions {
+    width: min(780px, calc(100% - 2rem));
+  }
+
+  .gallery-reveal-band {
+    min-height: 72px;
+  }
+
+  @keyframes mosaicTileSettle {
+    from {
+      opacity: 0;
+      transform:
+        translateY(calc(var(--mosaic-shift, 0px) + 22px))
+        rotateX(calc(var(--mosaic-rotate-x, 0deg) - 4deg))
+        rotateY(calc(var(--mosaic-rotate-y, 0deg) + 4deg))
+        rotateZ(var(--mosaic-rotate-z, 0deg));
+    }
+
+    to {
+      opacity: 1;
+      transform:
+        translateY(var(--mosaic-shift, 0px))
+        rotateX(var(--mosaic-rotate-x, 0deg))
+        rotateY(var(--mosaic-rotate-y, 0deg))
+        rotateZ(var(--mosaic-rotate-z, 0deg));
+    }
+  }
 }
 
 @media (min-width: 1220px) {

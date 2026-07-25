@@ -31,6 +31,7 @@ function media(filename, details = {}) {
     featured: Boolean(details.featured),
     orientation: details.orientation || "",
     transcript: details.transcript || "",
+    mosaicThumbSrc: details.mosaicThumbSrc || mosaicThumbSrcFor(filename, type),
     sphereThumbSrc: details.sphereThumbSrc || sphereThumbSrcFor(filename, type),
     galleryThumbSrc: details.galleryThumbSrc || galleryThumbSrcFor(filename, type),
     thumbSrc: details.thumbSrc || thumbnailSrcFor(filename, type),
@@ -83,6 +84,14 @@ function sphereThumbSrcFor(filename, type) {
     return `./images/optimized/video-posters/${stem}.webp`;
   }
   return "";
+}
+
+function mosaicThumbSrcFor(filename, type) {
+  const extension = getExtension(filename);
+  if (type !== "image" || !["jpg", "jpeg", "png", "webp"].includes(extension)) return "";
+  const clean = filename.replace(/^\.\/images\//, "").replace(/^images\//, "");
+  const stem = clean.replace(/\.[^.]+$/, "");
+  return `./images/optimized/mosaic-thumbs/${stem}.webp`;
 }
 
 function galleryThumbSrcFor(filename, type) {
@@ -392,8 +401,8 @@ const SPHERE_MIN_ZOOM = 0.18;
 const SPHERE_MAX_ZOOM = 0.96;
 const GALLERY_BATCH_SIZE = 48;
 const MOBILE_LIVE_TILE_BUDGET = 78;
-const TABLET_LIVE_TILE_BUDGET = 124;
-const DESKTOP_LIVE_TILE_BUDGET = 260;
+const DESKTOP_MOSAIC_MIN_TILES = 72;
+const DESKTOP_MOSAIC_MAX_TILES = 124;
 const STALE_MEDIA_CACHE = new Map();
 
 const selectors = {
@@ -469,6 +478,7 @@ function normaliseMediaItems(items) {
         caption: normalised.caption || "A memory held in the family archive.",
         date: normalised.date || inferDateFromFilename(normalised.src),
         alt: normalised.alt || defaultAltText(normalised.type),
+        mosaicThumbSrc: normalised.mosaicThumbSrc || mosaicThumbSrcFor(normalised.src, normalised.type),
         sphereThumbSrc: normalised.sphereThumbSrc || sphereThumbSrcFor(normalised.src, normalised.type),
         galleryThumbSrc: normalised.galleryThumbSrc || galleryThumbSrcFor(normalised.src, normalised.type),
         thumbSrc: normalised.thumbSrc || thumbnailSrcFor(normalised.src, normalised.type),
@@ -540,6 +550,8 @@ function renderMemorySphere() {
   sphere.replaceChildren();
   if (profile.mobile) {
     if (shell) shell.hidden = true;
+    if (shell) shell.classList.remove("memory-sphere--mosaic");
+    sphere.classList.remove("memory-sphere__stage--mosaic");
     state.sphere.items = [];
     state.sphere.positions = [];
     state.sphere.metrics = null;
@@ -562,16 +574,34 @@ function renderMemorySphere() {
     state.sphere.zoom = clampSphereZoom(state.sphere.baseZoom, metrics, shell);
   }
 
+  sphere.classList.toggle("memory-sphere__stage--mosaic", metrics.mode === "mosaic");
   if (shell) {
+    shell.classList.toggle("memory-sphere--mosaic", metrics.mode === "mosaic");
     shell.style.setProperty("--sphere-stage-size", `${metrics.stageSize}px`);
     shell.style.setProperty("--sphere-diameter", `${metrics.sphereDiameter}px`);
     shell.style.setProperty("--tile-base", `${metrics.tileBase}px`);
+    if (metrics.mode === "mosaic") {
+      shell.style.setProperty("--mosaic-columns", String(metrics.columns));
+      shell.style.setProperty("--mosaic-row-height", `${metrics.rowHeight}px`);
+      shell.style.setProperty("--mosaic-gap", `${metrics.gap}px`);
+      shell.style.setProperty("--mosaic-stage-height", `${metrics.stageHeight}px`);
+    }
   }
 
   sphereItems.forEach((item, index) => {
     const tile = document.createElement("button");
     const cell = metrics.cells[index];
-    tile.className = `sphere-tile${item.type === "video" ? " sphere-tile--video" : ""}`;
+    const mosaicColSpan = metrics.mode === "mosaic" && item.type === "video"
+      ? Math.min(cell.colSpan, 2)
+      : cell.colSpan;
+    const mosaicRowSpan = metrics.mode === "mosaic" && item.type === "video"
+      ? 1
+      : cell.rowSpan;
+    tile.className = [
+      "sphere-tile",
+      item.type === "video" ? "sphere-tile--video" : "",
+      metrics.mode === "mosaic" && item.type !== "video" && (item.featured || cell.featured) ? "sphere-tile--feature" : ""
+    ].filter(Boolean).join(" ");
     tile.type = "button";
     tile.dataset.src = item.src;
     tile.dataset.index = String(index);
@@ -585,6 +615,16 @@ function renderMemorySphere() {
     tile.style.setProperty("--depth", `${metrics.depth}px`);
     tile.style.setProperty("--tile-width", `${cell.width}px`);
     tile.style.setProperty("--tile-height", `${cell.height}px`);
+    if (metrics.mode === "mosaic") {
+      tile.style.setProperty("--mosaic-col-span", String(mosaicColSpan));
+      tile.style.setProperty("--mosaic-row-span", String(mosaicRowSpan));
+      tile.style.setProperty("--mosaic-depth", `${cell.depth}px`);
+      tile.style.setProperty("--mosaic-rotate-x", `${cell.tiltX}deg`);
+      tile.style.setProperty("--mosaic-rotate-y", `${cell.tiltY}deg`);
+      tile.style.setProperty("--mosaic-rotate-z", `${cell.tiltZ}deg`);
+      tile.style.setProperty("--mosaic-shift", `${cell.shift}px`);
+      tile.style.setProperty("--mosaic-delay", `${cell.delay}ms`);
+    }
 
     const tileSkin = document.createElement("span");
     tileSkin.className = "sphere-tile__skin";
@@ -618,6 +658,8 @@ function getGalleryMedia() {
 
 function getSphereDisplayItems(items) {
   if (items.length === 0) return [];
+  if (!getDeviceProfile().mobile) return getMosaicDisplayItems(items);
+
   const budget = getSphereRenderBudget(items.length);
   const visibleItems = items.length > budget ? sampleEvenly(items, budget) : items;
   const minimumTiles = getSphereMinimumTileCount(visibleItems.length, items.length);
@@ -626,11 +668,52 @@ function getSphereDisplayItems(items) {
   return Array.from({ length: minimumTiles }, (_, index) => visibleItems[index % visibleItems.length]);
 }
 
+function getMosaicDisplayItems(items) {
+  const profile = getDeviceProfile();
+  const budget = getSphereRenderBudget(items.length);
+  const images = items.filter((item) => item.type === "image" && !isHeic(item.src));
+  const videos = items.filter((item) => item.type === "video");
+  const maxVideos = Math.min(videos.length, profile.tablet ? 5 : 8, Math.floor(budget * 0.12));
+  const imageBudget = Math.min(images.length, Math.max(0, budget - maxVideos));
+  const sampledImages = sampleEvenly(images, imageBudget);
+  const sampledVideos = sampleEvenly(videos, maxVideos);
+  const visibleItems = interleaveMosaicMedia(sampledImages, sampledVideos);
+  const minimumTiles = getSphereMinimumTileCount(visibleItems.length, items.length);
+  if (!minimumTiles || visibleItems.length >= minimumTiles || visibleItems.length === 0) return visibleItems;
+
+  return Array.from({ length: minimumTiles }, (_, index) => visibleItems[index % visibleItems.length]);
+}
+
+function interleaveMosaicMedia(images, videos) {
+  if (!videos.length) return images;
+  const result = [];
+  const videoEvery = Math.max(8, Math.floor(images.length / videos.length));
+  let videoIndex = 0;
+
+  images.forEach((item, index) => {
+    result.push(item);
+    if (videoIndex < videos.length && (index + 1) % videoEvery === 0) {
+      result.push(videos[videoIndex]);
+      videoIndex += 1;
+    }
+  });
+
+  while (videoIndex < videos.length) {
+    result.push(videos[videoIndex]);
+    videoIndex += 1;
+  }
+
+  return result;
+}
+
 function getSphereThumbCandidates(item) {
   const profile = getDeviceProfile();
   if (item.type === "video") return uniqueSources([item.sphereThumbSrc, item.posterSrc]);
   const lightSources = [item.sphereThumbSrc, item.safeThumbSrc, item.galleryThumbSrc];
   if (profile.mobile || profile.lowMemory) return uniqueSources(lightSources);
+  if (state.sphere.metrics?.mode === "mosaic") {
+    return uniqueSources([item.mosaicThumbSrc, item.galleryThumbSrc, item.safeThumbSrc, item.src]);
+  }
   return uniqueSources([...lightSources, item.src]);
 }
 
@@ -645,6 +728,8 @@ function uniqueSources(sources) {
 
 function getSphereMetrics(count, shell) {
   const profile = getDeviceProfile();
+  if (!profile.mobile) return getMosaicMetrics(count, shell, profile);
+
   const density = Math.sqrt(Math.max(count, 1));
   const baseDepth = profile.mobile
     ? clamp(330 + density * 4.6, 350, 500)
@@ -663,6 +748,133 @@ function getSphereMetrics(count, shell) {
     viewHeight: getSphereViewHeight(sphereDiameter, getDefaultSphereZoom({ stageSize, sphereDiameter }, shell), profile),
     cells
   };
+}
+
+function getMosaicMetrics(count, shell, profile) {
+  const shellWidth = Math.max(900, shell?.clientWidth || window.innerWidth || 1200);
+  const columns = getMosaicColumnCount(profile);
+  const horizontalInset = profile.tablet ? 36 : 72;
+  const stageWidth = Math.min(shellWidth - horizontalInset, 1540);
+  const gap = profile.tablet ? 8 : shellWidth >= 1320 ? 10 : 9;
+  const rowHeight = clamp((stageWidth / columns) * (profile.tablet ? 0.78 : 0.72), 70, profile.tablet ? 108 : 122);
+  const cells = createMosaicSurfaceCells(count, columns, profile);
+  const estimatedRows = estimateMosaicRows(cells, columns);
+  const stageHeight = estimatedRows * rowHeight + Math.max(0, estimatedRows - 1) * gap;
+  const viewHeight = clamp(stageHeight + (profile.tablet ? 92 : 120), profile.tablet ? 590 : 680, profile.tablet ? 1040 : 1220);
+
+  return {
+    mode: "mosaic",
+    depth: profile.tablet ? 190 : 250,
+    sphereDiameter: stageWidth,
+    stageSize: stageWidth,
+    tileBase: rowHeight,
+    viewHeight,
+    columns,
+    rowHeight,
+    gap,
+    stageHeight,
+    cells
+  };
+}
+
+function getMosaicColumnCount(profile = getDeviceProfile()) {
+  if (profile.tablet) return 8;
+  if (profile.width >= 1600) return 14;
+  if (profile.width >= 1280) return 12;
+  return 10;
+}
+
+function getMosaicTileBudget(total, profile = getDeviceProfile()) {
+  const preferred = profile.tablet
+    ? 72
+    : profile.width >= 1600
+      ? DESKTOP_MOSAIC_MAX_TILES
+      : profile.width >= 1280
+        ? 108
+        : 88;
+  return Math.min(total, preferred);
+}
+
+function createMosaicSurfaceCells(total, columns, profile = getDeviceProfile()) {
+  const pattern = [
+    { colSpan: 2, rowSpan: 2, featured: true },
+    { colSpan: 1, rowSpan: 2 },
+    { colSpan: 2, rowSpan: 1 },
+    { colSpan: 1, rowSpan: 1 },
+    { colSpan: 1, rowSpan: 1 },
+    { colSpan: 2, rowSpan: 2 },
+    { colSpan: 1, rowSpan: 1 },
+    { colSpan: 2, rowSpan: 1 },
+    { colSpan: 1, rowSpan: 2 },
+    { colSpan: 1, rowSpan: 1 },
+    { colSpan: 3, rowSpan: 2, featured: true },
+    { colSpan: 1, rowSpan: 1 }
+  ];
+
+  return Array.from({ length: total }, (_, index) => {
+    const source = pattern[index % pattern.length];
+    const featured = Boolean(source.featured && !profile.tablet);
+    const colSpan = Math.min(source.colSpan, featured ? Math.min(columns, 3) : 2);
+    const rowSpan = Math.min(source.rowSpan, featured ? 2 : source.rowSpan);
+    const depthBand = (index % 9) - 4;
+    return {
+      rotateX: 0,
+      rotateY: 0,
+      width: 0,
+      height: 0,
+      colSpan,
+      rowSpan,
+      featured,
+      depth: depthBand * 9 + (featured ? 46 : 0),
+      tiltX: ((index % 5) - 2) * 0.42,
+      tiltY: ((index % 7) - 3) * 0.48,
+      tiltZ: ((index % 11) - 5) * 0.22,
+      shift: ((index % 6) - 2.5) * 2.4,
+      delay: (index % 24) * 34
+    };
+  });
+}
+
+function estimateMosaicRows(cells, columns) {
+  if (!cells.length) return 1;
+  const occupancy = [];
+  cells.forEach((cell) => {
+    const colSpan = Math.min(cell.colSpan || 1, columns);
+    const rowSpan = Math.max(1, cell.rowSpan || 1);
+    let placed = false;
+    let row = 0;
+
+    while (!placed) {
+      for (let column = 0; column <= columns - colSpan; column += 1) {
+        if (canPlaceMosaicCell(occupancy, row, column, colSpan, rowSpan)) {
+          fillMosaicCell(occupancy, row, column, colSpan, rowSpan);
+          placed = true;
+          break;
+        }
+      }
+      row += placed ? 0 : 1;
+    }
+  });
+
+  return Math.max(1, occupancy.length);
+}
+
+function canPlaceMosaicCell(occupancy, row, column, colSpan, rowSpan) {
+  for (let y = row; y < row + rowSpan; y += 1) {
+    for (let x = column; x < column + colSpan; x += 1) {
+      if (occupancy[y]?.[x]) return false;
+    }
+  }
+  return true;
+}
+
+function fillMosaicCell(occupancy, row, column, colSpan, rowSpan) {
+  for (let y = row; y < row + rowSpan; y += 1) {
+    if (!occupancy[y]) occupancy[y] = [];
+    for (let x = column; x < column + colSpan; x += 1) {
+      occupancy[y][x] = true;
+    }
+  }
 }
 
 function createSphereSurfaceCells(total, radius, profile = getDeviceProfile()) {
@@ -725,20 +937,24 @@ function createSphereSurfaceCells(total, radius, profile = getDeviceProfile()) {
 }
 
 function getDefaultSphereZoom(metrics, shell) {
+  if (metrics?.mode === "mosaic") return 1;
   return getSphereZoomRange(metrics, shell).defaultZoom;
 }
 
 function getSphereRenderBudget(total) {
   const profile = getDeviceProfile();
   if (profile.mobile || profile.lowMemory) return Math.min(total, MOBILE_LIVE_TILE_BUDGET);
-  if (profile.tablet) return Math.min(total, TABLET_LIVE_TILE_BUDGET);
-  return Math.min(total, DESKTOP_LIVE_TILE_BUDGET);
+  return getMosaicTileBudget(total, profile);
 }
 
 function getSphereMinimumTileCount(visibleCount, originalCount) {
   if (visibleCount <= 0) return 0;
   const profile = getDeviceProfile();
-  const target = profile.mobile ? 72 : profile.tablet ? 96 : 124;
+  const target = profile.mobile
+    ? 72
+    : profile.tablet
+      ? DESKTOP_MOSAIC_MIN_TILES
+      : Math.min(DESKTOP_MOSAIC_MAX_TILES, Math.max(DESKTOP_MOSAIC_MIN_TILES, getMosaicTileBudget(originalCount, profile)));
   if (originalCount < target) return target;
   return 0;
 }
@@ -754,6 +970,10 @@ function sampleEvenly(items, targetCount) {
 }
 
 function getSphereZoomRange(metrics, shell) {
+  if (metrics?.mode === "mosaic") {
+    return { min: 1, max: 1, defaultZoom: 1 };
+  }
+
   const profile = getDeviceProfile();
   const viewportHeight = getVisualViewportHeight();
   const availableWidth = Math.max(300, (shell ? shell.clientWidth : window.innerWidth) - (profile.mobile ? 20 : 36));
@@ -1111,16 +1331,22 @@ function bindGalleryReveal() {
   updateRevealButtons();
 
   reveal.addEventListener("click", () => {
-    state.galleryExpanded = !state.galleryExpanded;
+    const nextExpanded = !state.galleryExpanded;
+    state.galleryExpanded = nextExpanded;
+    if (nextExpanded) state.videosExpanded = false;
     panel.hidden = !(state.galleryExpanded || state.videosExpanded);
     reveal.setAttribute("aria-expanded", String(state.galleryExpanded));
+    videosReveal.setAttribute("aria-expanded", String(state.videosExpanded));
     updateRevealButtons();
     renderGallery();
   });
 
   videosReveal.addEventListener("click", () => {
-    state.videosExpanded = !state.videosExpanded;
+    const nextExpanded = !state.videosExpanded;
+    state.videosExpanded = nextExpanded;
+    if (nextExpanded) state.galleryExpanded = false;
     panel.hidden = !(state.galleryExpanded || state.videosExpanded);
+    reveal.setAttribute("aria-expanded", String(state.galleryExpanded));
     videosReveal.setAttribute("aria-expanded", String(state.videosExpanded));
     updateRevealButtons();
     renderGallery();
@@ -1156,6 +1382,11 @@ function bindSphereControls() {
   if (shell) {
     shell.addEventListener("pointerleave", () => {
       scheduleSphereSpyHide(0);
+      if (isMosaicMode()) {
+        state.sphere.rotationX = 0;
+        state.sphere.rotationY = 0;
+        updateSphereTransform();
+      }
     });
   }
 
@@ -1198,14 +1429,21 @@ function bindSphereControls() {
     state.sphere.lastX = event.clientX;
     state.sphere.lastY = event.clientY;
     if (Math.hypot(totalX, totalY) > 14) state.sphere.moved = true;
-    state.sphere.velocityY = deltaX * 0.28;
-    state.sphere.velocityX = state.sphere.handTool ? -deltaY * 0.22 : 0;
-    state.sphere.rotationY += state.sphere.velocityY;
-    if (state.sphere.handTool) {
-      state.sphere.rotationX = clamp(state.sphere.rotationX + state.sphere.velocityX, -58, 58);
+    if (isMosaicMode()) {
+      state.sphere.velocityY = deltaX * 0.035;
+      state.sphere.velocityX = -deltaY * 0.03;
+      state.sphere.rotationY = clamp(state.sphere.rotationY + state.sphere.velocityY, -10, 10);
+      state.sphere.rotationX = clamp(state.sphere.rotationX + state.sphere.velocityX, -8, 8);
     } else {
-      state.sphere.rotationX = 0;
-      state.sphere.rotationZ = 0;
+      state.sphere.velocityY = deltaX * 0.28;
+      state.sphere.velocityX = state.sphere.handTool ? -deltaY * 0.22 : 0;
+      state.sphere.rotationY += state.sphere.velocityY;
+      if (state.sphere.handTool) {
+        state.sphere.rotationX = clamp(state.sphere.rotationX + state.sphere.velocityX, -58, 58);
+      } else {
+        state.sphere.rotationX = 0;
+        state.sphere.rotationZ = 0;
+      }
     }
     state.sphere.lastInteraction = performance.now();
     updateSphereTransform();
@@ -1213,6 +1451,7 @@ function bindSphereControls() {
 
   sphere.addEventListener("pointermove", (event) => {
     if (state.sphere.dragging || !state.sphere.spyMode) return;
+    if (isMosaicMode()) updateMosaicPointerTilt(event);
     const tile = event.target.closest(".sphere-tile");
     if (!tile) {
       scheduleSphereSpyHide(80);
@@ -1282,13 +1521,21 @@ function bindSphereControls() {
     const step = event.shiftKey ? 18 : 8;
     if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
     event.preventDefault();
-    if (event.key === "ArrowLeft") state.sphere.rotationY -= step;
-    if (event.key === "ArrowRight") state.sphere.rotationY += step;
-    if (event.key === "ArrowUp") {
-      state.sphere.rotationX = state.sphere.handTool ? clamp(state.sphere.rotationX - step, -58, 58) : 0;
-    }
-    if (event.key === "ArrowDown") {
-      state.sphere.rotationX = state.sphere.handTool ? clamp(state.sphere.rotationX + step, -58, 58) : 0;
+    if (isMosaicMode()) {
+      const mosaicStep = event.shiftKey ? 4 : 2;
+      if (event.key === "ArrowLeft") state.sphere.rotationY = clamp(state.sphere.rotationY - mosaicStep, -10, 10);
+      if (event.key === "ArrowRight") state.sphere.rotationY = clamp(state.sphere.rotationY + mosaicStep, -10, 10);
+      if (event.key === "ArrowUp") state.sphere.rotationX = clamp(state.sphere.rotationX - mosaicStep, -8, 8);
+      if (event.key === "ArrowDown") state.sphere.rotationX = clamp(state.sphere.rotationX + mosaicStep, -8, 8);
+    } else {
+      if (event.key === "ArrowLeft") state.sphere.rotationY -= step;
+      if (event.key === "ArrowRight") state.sphere.rotationY += step;
+      if (event.key === "ArrowUp") {
+        state.sphere.rotationX = state.sphere.handTool ? clamp(state.sphere.rotationX - step, -58, 58) : 0;
+      }
+      if (event.key === "ArrowDown") {
+        state.sphere.rotationX = state.sphere.handTool ? clamp(state.sphere.rotationX + step, -58, 58) : 0;
+      }
     }
     state.sphere.lastInteraction = performance.now();
     updateSphereTransform();
@@ -1383,6 +1630,22 @@ function updateSphereTransform() {
   const sphere = document.querySelector(selectors.memorySphere);
   if (!sphere) return;
   const shell = sphere.closest(".memory-sphere");
+  const metrics = state.sphere.metrics;
+  if (metrics?.mode === "mosaic") {
+    state.sphere.rotationX = clamp(state.sphere.rotationX, -8, 8);
+    state.sphere.rotationY = clamp(state.sphere.rotationY, -10, 10);
+    state.sphere.rotationZ = 0;
+    state.sphere.zoom = 1;
+    sphere.style.setProperty("--mosaic-tilt-x", `${state.sphere.rotationX}deg`);
+    sphere.style.setProperty("--mosaic-tilt-y", `${state.sphere.rotationY}deg`);
+    sphere.style.setProperty("--sphere-zoom", "1");
+    if (shell) {
+      shell.style.setProperty("--sphere-zoom", "1");
+      shell.style.setProperty("--sphere-view-height", `${metrics.viewHeight}px`);
+    }
+    return;
+  }
+
   if (!state.sphere.handTool) {
     state.sphere.rotationX = 0;
     state.sphere.rotationZ = 0;
@@ -1402,6 +1665,24 @@ function updateSphereTransform() {
   }
 }
 
+function updateMosaicPointerTilt(event) {
+  const sphere = document.querySelector(selectors.memorySphere);
+  const shell = sphere ? sphere.closest(".memory-sphere") : null;
+  if (!shell || !isMosaicMode()) return;
+
+  const rect = shell.getBoundingClientRect();
+  const offsetX = clamp((event.clientX - rect.left) / Math.max(rect.width, 1), 0, 1) - 0.5;
+  const offsetY = clamp((event.clientY - rect.top) / Math.max(rect.height, 1), 0, 1) - 0.5;
+  state.sphere.rotationY = clamp(offsetX * 10, -10, 10);
+  state.sphere.rotationX = clamp(-offsetY * 8, -8, 8);
+  state.sphere.lastInteraction = performance.now();
+  updateSphereTransform();
+}
+
+function isMosaicMode() {
+  return state.sphere.metrics?.mode === "mosaic";
+}
+
 function startSphereInertia() {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (reduceMotion || state.sphere.frozen) return;
@@ -1416,12 +1697,17 @@ function startSphereInertia() {
       return;
     }
 
-    state.sphere.rotationY += state.sphere.velocityY;
-    if (state.sphere.handTool) {
-      state.sphere.rotationX = clamp(state.sphere.rotationX + state.sphere.velocityX, -58, 58);
+    if (isMosaicMode()) {
+      state.sphere.rotationY = clamp(state.sphere.rotationY + state.sphere.velocityY, -10, 10);
+      state.sphere.rotationX = clamp(state.sphere.rotationX + state.sphere.velocityX, -8, 8);
     } else {
-      state.sphere.rotationX = 0;
-      state.sphere.rotationZ = 0;
+      state.sphere.rotationY += state.sphere.velocityY;
+      if (state.sphere.handTool) {
+        state.sphere.rotationX = clamp(state.sphere.rotationX + state.sphere.velocityX, -58, 58);
+      } else {
+        state.sphere.rotationX = 0;
+        state.sphere.rotationZ = 0;
+      }
     }
     updateSphereTransform();
     state.sphere.inertiaFrame = window.requestAnimationFrame(glide);
@@ -1451,7 +1737,12 @@ function startSphereDrift() {
 
   const drift = (time) => {
     if (!state.sphere.frozen && !state.sphere.dragging && !state.sphere.inertiaFrame && time - state.sphere.lastInteraction > 1800) {
-      state.sphere.rotationY += 0.035;
+      if (isMosaicMode()) {
+        state.sphere.rotationY = Math.sin(time / 2500) * 3.6;
+        state.sphere.rotationX = Math.cos(time / 3100) * 2.4;
+      } else {
+        state.sphere.rotationY += 0.035;
+      }
       updateSphereTransform();
     }
     state.sphere.idleFrame = window.requestAnimationFrame(drift);

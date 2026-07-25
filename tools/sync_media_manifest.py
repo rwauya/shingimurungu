@@ -24,7 +24,7 @@ MANIFEST = ROOT / "media-manifest.js"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"}
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v"}
 EXCLUDED_DIRS = {"optimized", "converted", "__pycache__"}
-OPTIMIZED_MEDIA_DIRS = {"safe-thumbs", "gallery-thumbs", "sphere-thumbs", "video-posters"}
+OPTIMIZED_MEDIA_DIRS = {"safe-thumbs", "gallery-thumbs", "mosaic-thumbs", "sphere-thumbs", "video-posters"}
 OPTIMIZED_ROOT_FILES = {"murungu-backdrop.webp", "murungu-portrait.webp"}
 
 
@@ -161,7 +161,7 @@ def prune_optimized_files(manifest_entries: list[str]) -> None:
         if Path(entry).suffix.lower() in VIDEO_EXTENSIONS
     }
 
-    for folder_name in ("safe-thumbs", "gallery-thumbs", "sphere-thumbs"):
+    for folder_name in ("safe-thumbs", "gallery-thumbs", "mosaic-thumbs", "sphere-thumbs"):
         folder = OPTIMIZED / folder_name
         if not folder.exists():
             continue
@@ -197,6 +197,7 @@ def create_image_thumbnails(source: Path) -> None:
     rel = source.relative_to(IMAGES)
     stem = rel.with_suffix(".webp")
     targets = [
+        (OPTIMIZED / "mosaic-thumbs" / stem, 960, 72),
         (OPTIMIZED / "safe-thumbs" / stem, 680, 64),
         (OPTIMIZED / "gallery-thumbs" / stem, 460, 58),
         (OPTIMIZED / "sphere-thumbs" / stem, 96, 42),
