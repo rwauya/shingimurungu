@@ -135,7 +135,7 @@ const memorialData = {
   heroPortraitImage: "./images/optimized/murungu-portrait.webp",
   heroPortraitAlt: "Portrait of Shingai Glen Mwedzi, Murungu, wearing a red jacket and sunglasses",
   videoIntro: "Some memories live most clearly in motion: a turn of the head, a familiar expression, a voice, a laugh, a brief moment that brings someone close again.",
-  closingMessage: "Forever remembered with love, with gratitude, and with the quiet certainty that his presence continues in every story, photograph, and heart that carries him.",
+  closingMessage: "",
   mediaItems: [
     media("murungu.jpeg", {
       title: "Murungu",
