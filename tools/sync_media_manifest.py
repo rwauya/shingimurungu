@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import time
 from pathlib import Path
 
@@ -22,7 +23,9 @@ MANIFEST = ROOT / "media-manifest.js"
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"}
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v"}
-EXCLUDED_DIRS = {"optimized", "__pycache__"}
+EXCLUDED_DIRS = {"optimized", "converted", "__pycache__"}
+OPTIMIZED_MEDIA_DIRS = {"safe-thumbs", "gallery-thumbs", "sphere-thumbs", "video-posters"}
+OPTIMIZED_ROOT_FILES = {"murungu-backdrop.webp", "murungu-portrait.webp"}
 
 
 def main() -> None:
@@ -107,7 +110,8 @@ def convert_heic(source: Path) -> Path | None:
     try:
         with Image.open(source) as image:
             image = ImageOps.exif_transpose(image).convert("RGB")
-            image.save(target, "JPEG", quality=90, optimize=True)
+            image.thumbnail((1800, 1800), Image.Resampling.LANCZOS)
+            image.save(target, "JPEG", quality=82, optimize=True, progressive=True)
         return target
     except Exception as exc:
         print(f"Could not convert {source.name}: {exc}")
@@ -119,22 +123,38 @@ def clean_stale_converted_files() -> None:
     if not converted_root.exists():
         return
 
-    for converted in converted_root.rglob("*.jpg"):
-        rel = converted.relative_to(converted_root)
-        original_stem = IMAGES / rel.with_suffix("")
-        candidates = [
-            original_stem.with_suffix(".HEIC"),
-            original_stem.with_suffix(".heic"),
-            original_stem.with_suffix(".HEIF"),
-            original_stem.with_suffix(".heif"),
-        ]
-        if any(candidate.exists() for candidate in candidates):
+    expected = {
+        to_posix(source.relative_to(IMAGES).with_suffix(".jpg"))
+        for source in iter_source_files() or []
+        if source.suffix.lower() in {".heic", ".heif"}
+    }
+
+    for converted in converted_root.rglob("*"):
+        if not converted.is_file():
+            continue
+        rel = to_posix(converted.relative_to(converted_root))
+        if rel in expected:
             continue
         converted.unlink()
+    remove_empty_dirs(converted_root)
 
 
 def prune_optimized_files(manifest_entries: list[str]) -> None:
-    image_allowed = {Path(entry).with_suffix(".webp").as_posix() for entry in manifest_entries}
+    if not OPTIMIZED.exists():
+        return
+
+    for child in OPTIMIZED.iterdir():
+        if child.is_dir() and child.name not in OPTIMIZED_MEDIA_DIRS:
+            shutil.rmtree(child)
+        elif child.is_file() and child.name not in OPTIMIZED_ROOT_FILES:
+            child.unlink()
+
+    image_entries = [
+        entry
+        for entry in manifest_entries
+        if Path(entry).suffix.lower() in IMAGE_EXTENSIONS - {".heic", ".heif"}
+    ]
+    image_allowed = {Path(entry).with_suffix(".webp").as_posix() for entry in image_entries}
     video_allowed = {
         Path(entry).with_suffix(".webp").as_posix()
         for entry in manifest_entries
@@ -145,24 +165,41 @@ def prune_optimized_files(manifest_entries: list[str]) -> None:
         folder = OPTIMIZED / folder_name
         if not folder.exists():
             continue
-        for generated in folder.rglob("*.webp"):
+        for generated in folder.rglob("*"):
+            if not generated.is_file():
+                continue
             if to_posix(generated.relative_to(folder)) not in image_allowed:
                 generated.unlink()
+        remove_empty_dirs(folder)
 
     video_folder = OPTIMIZED / "video-posters"
     if video_folder.exists():
-        for generated in video_folder.rglob("*.webp"):
+        for generated in video_folder.rglob("*"):
+            if not generated.is_file():
+                continue
             if to_posix(generated.relative_to(video_folder)) not in video_allowed:
                 generated.unlink()
+        remove_empty_dirs(video_folder)
+
+
+def remove_empty_dirs(root: Path) -> None:
+    if not root.exists():
+        return
+
+    for folder in sorted((path for path in root.rglob("*") if path.is_dir()), key=lambda path: len(path.parts), reverse=True):
+        try:
+            folder.rmdir()
+        except OSError:
+            pass
 
 
 def create_image_thumbnails(source: Path) -> None:
     rel = source.relative_to(IMAGES)
     stem = rel.with_suffix(".webp")
     targets = [
-        (OPTIMIZED / "safe-thumbs" / stem, 760, 68),
-        (OPTIMIZED / "gallery-thumbs" / stem, 520, 62),
-        (OPTIMIZED / "sphere-thumbs" / stem, 132, 48),
+        (OPTIMIZED / "safe-thumbs" / stem, 680, 64),
+        (OPTIMIZED / "gallery-thumbs" / stem, 460, 58),
+        (OPTIMIZED / "sphere-thumbs" / stem, 96, 42),
     ]
 
     try:
@@ -192,10 +229,10 @@ def ensure_video_poster(source: Path) -> None:
     try:
         with Image.open(fallback) as image:
             image = ImageOps.exif_transpose(image).convert("RGB")
-            image.thumbnail((640, 640), Image.Resampling.LANCZOS)
-            image.save(target, "WEBP", quality=70, method=6)
+            image.thumbnail((420, 420), Image.Resampling.LANCZOS)
+            image.save(target, "WEBP", quality=58, method=6)
     except Exception:
-        Image.new("RGB", (640, 360), (30, 28, 24)).save(target, "WEBP", quality=70, method=6)
+        Image.new("RGB", (420, 236), (30, 28, 24)).save(target, "WEBP", quality=58, method=6)
 
 
 def write_manifest(entries: list[str]) -> None:

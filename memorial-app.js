@@ -61,11 +61,7 @@ function detectMediaType(src) {
 }
 
 function thumbnailSrcFor(filename, type) {
-  const extension = getExtension(filename);
-  if (type !== "image" || !["jpg", "jpeg", "png", "webp"].includes(extension)) return "";
-  const clean = filename.replace(/^\.\/images\//, "").replace(/^images\//, "");
-  const stem = clean.replace(/\.[^.]+$/, "");
-  return `./images/optimized/thumbs/${stem}.webp`;
+  return "";
 }
 
 function safeThumbnailSrcFor(filename, type) {
@@ -295,7 +291,6 @@ const memorialData = {
     media("converted/IMG_9008(1).jpg"),
     media("converted/IMG_9009.jpg"),
     media("converted/IMG_9010.jpg"),
-    media("IMG_9018.MOV"),
     media("PHOTO-2026-05-07-07-00-29.jpg"),
     media("PHOTO-2026-05-07-07-23-43.jpg"),
     media("PHOTO-2026-05-07-07-23-43(1).jpg"),
@@ -328,9 +323,7 @@ const memorialData = {
     media("PHOTO-2026-05-07-07-25-38(3).jpg"),
     media("PHOTO-2026-05-07-07-25-38(4).jpg"),
     media("PHOTO-2026-05-07-07-25-38(5).jpg"),
-    media("PHOTO-2026-05-07-07-25-38(6).jpg"),
     media("PHOTO-2026-05-07-07-25-38(7).jpg"),
-    media("PHOTO-2026-05-07-07-25-38(8).jpg"),
     media("PHOTO-2026-05-07-07-25-38(9).jpg"),
     media("PHOTO-2026-05-07-20-58-41.jpg"),
     media("PHOTO-2026-05-08-10-08-40.jpg"),
@@ -374,8 +367,9 @@ const state = {
     userZoomed: false,
     focusIndex: 0,
     spyMode: true,
-    handTool: false,
-    frozen: false,
+    handTool: true,
+    frozen: true,
+    metrics: null,
     dragging: false,
     velocityX: 0,
     velocityY: 0,
@@ -395,10 +389,13 @@ const state = {
   }
 };
 
-const SPHERE_MIN_ZOOM = 0.42;
-const SPHERE_MAX_ZOOM = 0.9;
-const SPHERE_FOCUS_ZOOM = 0.86;
+const SPHERE_MIN_ZOOM = 0.18;
+const SPHERE_MAX_ZOOM = 0.96;
 const GALLERY_BATCH_SIZE = 48;
+const MOBILE_LIVE_TILE_BUDGET = 78;
+const TABLET_LIVE_TILE_BUDGET = 124;
+const DESKTOP_LIVE_TILE_BUDGET = 260;
+const STALE_MEDIA_CACHE = new Map();
 
 const selectors = {
   loader: "[data-loader]",
@@ -412,7 +409,6 @@ const selectors = {
   sunset: "#sunset",
   laidToRest: "#laid-to-rest",
   memorySphere: "#memory-sphere",
-  sphereControls: "[data-sphere-action]",
   sphereSpy: "#sphere-spy",
   galleryPanel: "#gallery-panel",
   galleryReveal: "#gallery-reveal",
@@ -421,7 +417,6 @@ const selectors = {
   galleryImagesSection: "#images-gallery-section",
   galleryVideosSection: "#videos-gallery-section",
   galleryEmpty: "#gallery-empty",
-  filterTabs: ".filter-tab",
   closingMessage: "#closing-message",
   closingDates: "#closing-dates",
   lightbox: "#lightbox",
@@ -433,11 +428,13 @@ const selectors = {
 };
 
 let mediaItems = [];
+let sourceValidationToken = 0;
 
 document.addEventListener("DOMContentLoaded", init);
 
 function init() {
   try {
+    updateViewportSizeVars();
     mediaItems = normaliseMediaItems(resolveMediaItems());
     applyMemorialData();
     renderMemorySphere();
@@ -454,7 +451,10 @@ function init() {
 function hideLoader() {
   document.body.classList.add("is-ready");
   const loader = document.querySelector(selectors.loader);
-  if (loader) loader.classList.add("is-hidden");
+  if (loader) {
+    loader.classList.add("is-hidden");
+    window.setTimeout(() => loader.remove(), 650);
+  }
 }
 
 function normaliseMediaItems(items) {
@@ -538,14 +538,15 @@ function renderMemorySphere() {
   sphere.replaceChildren();
   const sourceItems = getGalleryMedia();
   const sphereItems = getSphereDisplayItems(sourceItems);
-  const metrics = getSphereMetrics(sphereItems.length);
   const shell = sphere.closest(".memory-sphere");
+  const metrics = getSphereMetrics(sphereItems.length, shell);
   const fragment = document.createDocumentFragment();
   state.sphere.items = sphereItems;
   state.sphere.positions = [];
+  state.sphere.metrics = metrics;
   state.sphere.baseZoom = getDefaultSphereZoom(metrics, shell);
   if (!state.sphere.userZoomed) {
-    state.sphere.zoom = clamp(state.sphere.baseZoom, SPHERE_MIN_ZOOM, SPHERE_MAX_ZOOM);
+    state.sphere.zoom = clampSphereZoom(state.sphere.baseZoom, metrics, shell);
   }
 
   if (shell) {
@@ -595,6 +596,7 @@ function renderMemorySphere() {
 
   sphere.append(fragment);
   updateSphereTransform();
+  scheduleDisplayedSourceValidation(sphereItems);
 }
 
 function getGalleryMedia() {
@@ -603,47 +605,57 @@ function getGalleryMedia() {
 
 function getSphereDisplayItems(items) {
   if (items.length === 0) return [];
-  const minimumTiles = items.length < 24 ? 72 : 0;
-  if (!minimumTiles) return items;
+  const budget = getSphereRenderBudget(items.length);
+  const visibleItems = items.length > budget ? sampleEvenly(items, budget) : items;
+  const minimumTiles = getSphereMinimumTileCount(visibleItems.length, items.length);
+  if (!minimumTiles || visibleItems.length >= minimumTiles) return visibleItems;
 
-  return Array.from({ length: minimumTiles }, (_, index) => items[index % items.length]);
+  return Array.from({ length: minimumTiles }, (_, index) => visibleItems[index % visibleItems.length]);
 }
 
 function getSphereThumbCandidates(item) {
+  const profile = getDeviceProfile();
   if (item.type === "video") return uniqueSources([item.sphereThumbSrc, item.posterSrc]);
-  return uniqueSources([item.sphereThumbSrc, item.galleryThumbSrc, item.safeThumbSrc, item.thumbSrc, item.src]);
+  const lightSources = [item.sphereThumbSrc, item.safeThumbSrc, item.galleryThumbSrc];
+  if (profile.mobile || profile.lowMemory) return uniqueSources(lightSources);
+  return uniqueSources([...lightSources, item.src]);
 }
 
 function getGalleryThumbCandidates(item) {
   if (item.type === "video") return uniqueSources([item.posterSrc]);
-  return uniqueSources([item.galleryThumbSrc, item.safeThumbSrc, item.thumbSrc, item.src]);
+  return uniqueSources([item.galleryThumbSrc, item.safeThumbSrc, item.src]);
 }
 
 function uniqueSources(sources) {
   return sources.filter(Boolean).filter((src, index, list) => list.indexOf(src) === index);
 }
 
-function getSphereMetrics(count) {
+function getSphereMetrics(count, shell) {
+  const profile = getDeviceProfile();
   const density = Math.sqrt(Math.max(count, 1));
-  const baseDepth = clamp(580 + density * 11, 680, 1900);
+  const baseDepth = profile.mobile
+    ? clamp(330 + density * 4.6, 350, 500)
+    : profile.tablet
+      ? clamp(420 + density * 6.2, 470, 700)
+      : clamp(560 + density * 9.2, 640, 1120);
   const depth = baseDepth + 16;
   const sphereDiameter = depth * 2;
   const stageSize = sphereDiameter;
-  const cells = createSphereSurfaceCells(count, depth);
+  const cells = createSphereSurfaceCells(count, depth, profile);
   return {
     depth,
     sphereDiameter,
     stageSize,
-    tileBase: clamp(78 - density * 0.85, 24, 70),
-    viewHeight: clamp(sphereDiameter * 0.82 + 180, 760, 2600),
+    tileBase: clamp(58 - density * 0.66, 16, 52),
+    viewHeight: getSphereViewHeight(sphereDiameter, getDefaultSphereZoom({ stageSize, sphereDiameter }, shell), profile),
     cells
   };
 }
 
-function createSphereSurfaceCells(total, radius) {
+function createSphereSurfaceCells(total, radius, profile = getDeviceProfile()) {
   if (!total) return [];
 
-  const rowCount = Math.min(total, clamp(Math.round(Math.sqrt(total) * 1.25), 5, 80));
+  const rowCount = Math.min(total, clamp(Math.round(Math.sqrt(total) * 1.34), 5, profile.mobile ? 24 : 80));
   const weights = Array.from({ length: rowCount }, (_, row) => {
     const latitude = -Math.PI / 2 + ((row + 0.5) / rowCount) * Math.PI;
     return Math.max(Math.cos(latitude), 0.12);
@@ -673,12 +685,16 @@ function createSphereSurfaceCells(total, radius) {
 
   const cells = [];
   const rowHeight = (Math.PI * radius) / rowCount;
-  const fillRatio = total > 1200 ? 0.93 : 0.86;
+  const fillRatio = total > 1200 ? 0.86 : 0.68;
+  const minTileWidth = profile.mobile ? 20 : 26;
+  const maxTileWidth = profile.mobile ? 66 : profile.tablet ? 92 : 118;
+  const minTileHeight = profile.mobile ? 16 : 20;
+  const maxTileHeight = profile.mobile ? 50 : profile.tablet ? 68 : 86;
   rowCounts.forEach((columns, row) => {
     const latitude = -Math.PI / 2 + ((row + 0.5) / rowCount) * Math.PI;
     const circumference = Math.max(2 * Math.PI * radius * Math.cos(latitude), rowHeight * 1.2);
-    const tileWidth = (circumference / columns) * fillRatio;
-    const tileHeight = rowHeight * fillRatio;
+    const tileWidth = clamp((circumference / columns) * fillRatio, minTileWidth, maxTileWidth);
+    const tileHeight = clamp(rowHeight * fillRatio, minTileHeight, maxTileHeight);
     const rowOffset = row % 2 ? 0.5 : 0;
 
     for (let column = 0; column < columns; column += 1) {
@@ -696,9 +712,105 @@ function createSphereSurfaceCells(total, radius) {
 }
 
 function getDefaultSphereZoom(metrics, shell) {
-  const availableWidth = Math.max(320, (shell ? shell.clientWidth : window.innerWidth) - 28);
-  const fitZoom = (availableWidth / metrics.stageSize) * 0.9;
-  return clamp(fitZoom, 0.38, 0.82);
+  return getSphereZoomRange(metrics, shell).defaultZoom;
+}
+
+function getSphereRenderBudget(total) {
+  const profile = getDeviceProfile();
+  if (profile.mobile || profile.lowMemory) return Math.min(total, MOBILE_LIVE_TILE_BUDGET);
+  if (profile.tablet) return Math.min(total, TABLET_LIVE_TILE_BUDGET);
+  return Math.min(total, DESKTOP_LIVE_TILE_BUDGET);
+}
+
+function getSphereMinimumTileCount(visibleCount, originalCount) {
+  if (visibleCount <= 0) return 0;
+  const profile = getDeviceProfile();
+  const target = profile.mobile ? 72 : profile.tablet ? 96 : 124;
+  if (originalCount < target) return target;
+  return 0;
+}
+
+function sampleEvenly(items, targetCount) {
+  if (!targetCount || items.length <= targetCount) return items;
+  const sampled = [];
+  const step = items.length / targetCount;
+  for (let index = 0; index < targetCount; index += 1) {
+    sampled.push(items[Math.floor(index * step)]);
+  }
+  return sampled;
+}
+
+function getSphereZoomRange(metrics, shell) {
+  const profile = getDeviceProfile();
+  const viewportHeight = getVisualViewportHeight();
+  const availableWidth = Math.max(300, (shell ? shell.clientWidth : window.innerWidth) - (profile.mobile ? 20 : 36));
+  const maxVisualHeight = profile.mobile
+    ? Math.max(300, viewportHeight * 0.54)
+    : profile.tablet
+      ? Math.max(460, viewportHeight * 0.62)
+      : Math.max(560, viewportHeight * 0.66);
+  const fitZoom = Math.min(
+    (availableWidth / metrics.stageSize) * 0.94,
+    (maxVisualHeight / metrics.stageSize) * 0.94
+  );
+  const maxZoom = clamp(fitZoom, SPHERE_MIN_ZOOM, SPHERE_MAX_ZOOM);
+  const minZoom = Math.min(
+    maxZoom,
+    Math.max(SPHERE_MIN_ZOOM, maxZoom * (profile.mobile ? 0.72 : 0.68))
+  );
+  return {
+    min: minZoom,
+    max: maxZoom,
+    defaultZoom: clamp(maxZoom * (profile.mobile ? 0.94 : 0.98), minZoom, maxZoom)
+  };
+}
+
+function clampSphereZoom(value, metrics = state.sphere.metrics, shell = getSphereShell()) {
+  if (!metrics) return clamp(value, SPHERE_MIN_ZOOM, SPHERE_MAX_ZOOM);
+  const range = getSphereZoomRange(metrics, shell);
+  return clamp(value, range.min, range.max);
+}
+
+function getSphereViewHeight(sphereDiameter, zoom, profile = getDeviceProfile()) {
+  const visibleDiameter = sphereDiameter * zoom;
+  const extra = profile.mobile ? 54 : profile.tablet ? 82 : 110;
+  const minimum = profile.mobile ? 320 : profile.tablet ? 470 : 560;
+  const maximum = profile.mobile ? Math.max(360, getVisualViewportHeight() * 0.62) : 1800;
+  return clamp(visibleDiameter + extra, minimum, maximum);
+}
+
+function getSphereShell() {
+  const sphere = document.querySelector(selectors.memorySphere);
+  return sphere ? sphere.closest(".memory-sphere") : null;
+}
+
+function getDeviceProfile() {
+  const width = Math.max(320, window.innerWidth || document.documentElement.clientWidth || 1024);
+  const height = getVisualViewportHeight();
+  const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
+  const touch = coarsePointer || navigator.maxTouchPoints > 0;
+  const memory = Number(navigator.deviceMemory || 8);
+  const mobile = width <= 680 || (touch && width <= 820);
+  return {
+    width,
+    height,
+    touch,
+    mobile,
+    tablet: !mobile && width <= 1100,
+    lowMemory: memory <= 4
+  };
+}
+
+function getVisualViewportHeight() {
+  return Math.max(420, Math.round(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 720));
+}
+
+function updateViewportSizeVars() {
+  const root = document.documentElement;
+  root.style.setProperty("--app-vh", `${getVisualViewportHeight() * 0.01}px`);
+  const profile = getDeviceProfile();
+  root.toggleAttribute("data-touch-device", profile.touch);
+  root.toggleAttribute("data-mobile-globe", profile.mobile);
 }
 
 function renderGallery() {
@@ -929,30 +1041,24 @@ function bindInteractions() {
     if (header) header.classList.toggle("is-scrolled", window.scrollY > 12);
   }, { passive: true });
 
-  window.addEventListener("resize", debounce(() => {
+  const handleViewportChange = debounce(() => {
+    updateViewportSizeVars();
     state.sphere.userZoomed = false;
     renderMemorySphere();
-  }, 160), { passive: true });
+  }, 180);
 
-  document.querySelectorAll(selectors.filterTabs).forEach((button) => {
-    button.addEventListener("click", () => {
-      state.currentFilter = button.dataset.filter || "all";
-      state.sphere.rotationX = 0;
-      state.sphere.rotationY = 0;
-      state.sphere.rotationZ = 0;
-      state.sphere.focusIndex = 0;
-      state.sphere.userZoomed = false;
-      cancelSphereInertia();
-      clearSphereFocus();
-      renderSphereSpy(null);
-      document.querySelectorAll(selectors.filterTabs).forEach((tab) => {
-        const active = tab === button;
-        tab.classList.toggle("is-active", active);
-        tab.setAttribute("aria-pressed", String(active));
-      });
-      renderMemorySphere();
-      renderGallery();
-    });
+  window.addEventListener("resize", handleViewportChange, { passive: true });
+  window.addEventListener("orientationchange", handleViewportChange, { passive: true });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", handleViewportChange, { passive: true });
+    window.visualViewport.addEventListener("scroll", debounce(() => {
+      updateViewportSizeVars();
+      updateSphereTransform();
+    }, 120), { passive: true });
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) cancelSphereInertia();
   });
 
   if (lightbox) {
@@ -968,8 +1074,6 @@ function bindInteractions() {
 
   document.addEventListener("keydown", handleKeyboard);
   bindGalleryReveal();
-  bindSphereToolbar();
-  bindHandControls();
   bindSphereControls();
   startSphereDrift();
 }
@@ -987,70 +1091,6 @@ function bindGalleryReveal() {
     if (label) label.textContent = state.galleryExpanded ? "Close Full Gallery" : "Open Full Gallery";
     renderGallery();
   });
-}
-
-function bindSphereToolbar() {
-  document.querySelectorAll(selectors.sphereControls).forEach((button) => {
-    button.addEventListener("click", () => handleSphereAction(button.dataset.sphereAction || "", button));
-  });
-}
-
-function handleSphereAction(action, button) {
-  if (action === "freeze") {
-    state.sphere.frozen = !state.sphere.frozen;
-    if (state.sphere.frozen) cancelSphereInertia();
-    if (button) {
-      button.setAttribute("aria-pressed", String(state.sphere.frozen));
-      button.textContent = state.sphere.frozen ? "Resume Motion" : "Pause Motion";
-    }
-  }
-  if (action === "zoom-in") {
-    state.sphere.zoom = clamp(state.sphere.zoom + 0.1, SPHERE_MIN_ZOOM, SPHERE_MAX_ZOOM);
-    state.sphere.userZoomed = true;
-  }
-  if (action === "zoom-out") {
-    state.sphere.zoom = clamp(state.sphere.zoom - 0.1, SPHERE_MIN_ZOOM, SPHERE_MAX_ZOOM);
-    state.sphere.userZoomed = true;
-  }
-  if (action === "hand-tool") {
-    setHandTool(!state.sphere.handTool, button);
-    return;
-  }
-  if (action === "reset") {
-    cancelSphereInertia();
-    state.sphere.rotationX = 0;
-    state.sphere.rotationY = 0;
-    state.sphere.rotationZ = 0;
-    state.sphere.zoom = state.sphere.baseZoom || 0.72;
-    state.sphere.userZoomed = false;
-    state.sphere.focusIndex = 0;
-    setHandTool(false);
-    clearSphereFocus();
-    renderSphereSpy(null);
-  }
-  if (action === "snipe") {
-    focusSphereItem(state.sphere.focusIndex + 1, state.sphere.spyMode);
-    return;
-  }
-  if (action === "open-focused") {
-    const item = state.sphere.items[state.sphere.focusIndex];
-    if (item) openLightboxBySrc(item.src, getFilteredMedia());
-    return;
-  }
-  if (action === "spy") {
-    state.sphere.spyMode = !state.sphere.spyMode;
-    if (button) {
-      button.setAttribute("aria-pressed", String(state.sphere.spyMode));
-      button.textContent = state.sphere.spyMode ? "Hide Preview" : "Show Preview";
-    }
-    if (state.sphere.spyMode) {
-      focusSphereItem(state.sphere.focusIndex, true);
-      return;
-    }
-    renderSphereSpy(null);
-  }
-  state.sphere.lastInteraction = performance.now();
-  updateSphereTransform();
 }
 
 function bindSphereControls() {
@@ -1088,7 +1128,11 @@ function bindSphereControls() {
     state.sphere.pendingSrc = tile ? tile.dataset.src || "" : "";
     state.sphere.lastInteraction = performance.now();
     sphere.classList.add("is-dragging");
-    sphere.setPointerCapture(event.pointerId);
+    try {
+      sphere.setPointerCapture(event.pointerId);
+    } catch (error) {
+      // Some mobile browsers drop pointer capture when browser chrome changes.
+    }
   });
 
   sphere.addEventListener("pointermove", (event) => {
@@ -1128,8 +1172,12 @@ function bindSphereControls() {
     state.sphere.dragging = false;
     state.sphere.lastInteraction = performance.now();
     sphere.classList.remove("is-dragging");
-    if (sphere.hasPointerCapture(event.pointerId)) {
-      sphere.releasePointerCapture(event.pointerId);
+    try {
+      if (sphere.hasPointerCapture(event.pointerId)) {
+        sphere.releasePointerCapture(event.pointerId);
+      }
+    } catch (error) {
+      // Keep drag recovery quiet if the pointer was cancelled by the browser.
     }
     if (!state.sphere.moved && state.sphere.pendingSrc) {
       openSphereTile(state.sphere.pendingSrc);
@@ -1193,69 +1241,6 @@ function bindSphereControls() {
   });
 }
 
-function bindHandControls() {
-  document.querySelectorAll("[data-sphere-hand]").forEach((button) => {
-    button.addEventListener("click", () => {
-      setHandTool(true);
-      applyHandRotation(button.dataset.sphereHand || "");
-    });
-  });
-}
-
-function setHandTool(enabled, controlButton) {
-  state.sphere.handTool = Boolean(enabled);
-  const button = controlButton || document.querySelector('[data-sphere-action="hand-tool"]');
-  const pad = document.querySelector("#sphere-hand-pad");
-  if (button) {
-    button.setAttribute("aria-pressed", String(state.sphere.handTool));
-    button.textContent = state.sphere.handTool ? "Hand Active" : "Hand Tool";
-  }
-  if (pad) pad.hidden = !state.sphere.handTool;
-  if (!state.sphere.handTool) {
-    state.sphere.rotationX = 0;
-    state.sphere.rotationZ = 0;
-  }
-  state.sphere.lastInteraction = performance.now();
-  updateSphereTransform();
-}
-
-function applyHandRotation(direction) {
-  const step = 12;
-  cancelSphereInertia();
-  if (direction === "left") state.sphere.rotationY -= step;
-  if (direction === "right") state.sphere.rotationY += step;
-  if (direction === "up") state.sphere.rotationX = clamp(state.sphere.rotationX - step, -58, 58);
-  if (direction === "down") state.sphere.rotationX = clamp(state.sphere.rotationX + step, -58, 58);
-  if (direction === "roll-left") state.sphere.rotationZ -= step;
-  if (direction === "roll-right") state.sphere.rotationZ += step;
-  state.sphere.lastInteraction = performance.now();
-  updateSphereTransform();
-}
-
-function focusSphereItem(index, showPanel) {
-  const count = state.sphere.items.length;
-  if (!count) return;
-  const nextIndex = (index + count) % count;
-  const position = state.sphere.positions[nextIndex];
-  state.sphere.focusIndex = nextIndex;
-  if (position) {
-    state.sphere.rotationY = -position.rotateY;
-    state.sphere.rotationX = 0;
-    state.sphere.rotationZ = 0;
-    state.sphere.zoom = clamp(Math.max(state.sphere.zoom, SPHERE_FOCUS_ZOOM), SPHERE_MIN_ZOOM, SPHERE_MAX_ZOOM);
-    state.sphere.userZoomed = true;
-  }
-  clearSphereFocus();
-  const tile = document.querySelector(`.sphere-tile[data-index="${nextIndex}"]`);
-  if (tile) {
-    tile.classList.add("is-focused");
-    tile.focus({ preventScroll: true });
-  }
-  if (showPanel) renderSphereSpy(state.sphere.items[nextIndex], true, tile || null);
-  state.sphere.lastInteraction = performance.now();
-  updateSphereTransform();
-}
-
 function openSphereTile(src) {
   if (!src) return;
   const now = performance.now();
@@ -1270,14 +1255,12 @@ function scheduleSphereSpyHide(delay = 120) {
   renderSphereSpy.hideTimer = window.setTimeout(() => renderSphereSpy(null), delay);
 }
 
-function clearSphereFocus() {
-  document.querySelectorAll(".sphere-tile.is-focused").forEach((tile) => tile.classList.remove("is-focused"));
-}
-
 function renderSphereSpy(item, temporary, anchor) {
   const panel = document.querySelector(selectors.sphereSpy);
   if (!panel) return;
   window.clearTimeout(renderSphereSpy.hideTimer);
+  window.clearTimeout(renderSphereSpy.clickTimer);
+  panel.classList.remove("is-clickable");
   panel.replaceChildren();
   if (!item) {
     panel.hidden = true;
@@ -1290,7 +1273,7 @@ function renderSphereSpy(item, temporary, anchor) {
   previewButton.setAttribute("aria-label", `Open ${item.title || "memory"} in the memorial viewer`);
   previewButton.addEventListener("click", () => openSphereTile(item.src));
 
-  const thumb = item.type === "video" ? item.posterSrc : (item.galleryThumbSrc || item.safeThumbSrc || item.thumbSrc || item.src);
+  const thumb = item.type === "video" ? item.posterSrc : (item.galleryThumbSrc || item.safeThumbSrc || item.src);
   if (thumb) {
     const img = document.createElement("img");
     img.src = thumb;
@@ -1305,6 +1288,9 @@ function renderSphereSpy(item, temporary, anchor) {
   previewButton.append(text);
   panel.append(previewButton);
   panel.hidden = false;
+  renderSphereSpy.clickTimer = window.setTimeout(() => {
+    if (!panel.hidden) panel.classList.add("is-clickable");
+  }, 220);
   window.requestAnimationFrame(() => updateSpherePreviewPosition(anchor));
 
   if (temporary && !state.sphere.spyMode) {
@@ -1349,15 +1335,15 @@ function updateSphereTransform() {
   } else {
     state.sphere.rotationX = clamp(state.sphere.rotationX, -58, 58);
   }
-  state.sphere.zoom = clamp(state.sphere.zoom, SPHERE_MIN_ZOOM, SPHERE_MAX_ZOOM);
+  state.sphere.zoom = clampSphereZoom(state.sphere.zoom);
   sphere.style.setProperty("--sphere-rotate-x", `${state.sphere.rotationX}deg`);
   sphere.style.setProperty("--sphere-rotate-y", `${state.sphere.rotationY}deg`);
   sphere.style.setProperty("--sphere-rotate-z", `${state.sphere.rotationZ}deg`);
   sphere.style.setProperty("--sphere-zoom", String(state.sphere.zoom));
   if (shell) {
+    shell.style.setProperty("--sphere-zoom", String(state.sphere.zoom));
     const stageSize = Number.parseFloat(getComputedStyle(shell).getPropertyValue("--sphere-diameter")) || 980;
-    const buffer = clamp(window.innerWidth * 0.14, 170, 310);
-    const viewHeight = clamp(stageSize * state.sphere.zoom + buffer, 720, 2600);
+    const viewHeight = getSphereViewHeight(stageSize, state.sphere.zoom);
     shell.style.setProperty("--sphere-view-height", `${viewHeight}px`);
   }
 }
@@ -1400,7 +1386,7 @@ function cancelSphereInertia() {
 function startSphereDrift() {
   const sphere = document.querySelector(selectors.memorySphere);
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (!sphere || reduceMotion) return;
+  if (!sphere || reduceMotion || state.sphere.frozen) return;
 
   const drift = (time) => {
     if (!state.sphere.frozen && !state.sphere.dragging && !state.sphere.inertiaFrame && time - state.sphere.lastInteraction > 1800) {
@@ -1427,12 +1413,93 @@ function debounce(callback, delay) {
   };
 }
 
-function openLightboxBySrc(src, scope) {
+async function openLightboxBySrc(src, scope) {
   const scopedItems = scope && scope.length ? scope : getFilteredMedia();
   const index = scopedItems.findIndex((item) => item.src === src);
+  const item = scopedItems[index >= 0 ? index : 0];
+  if (!item || !(await ensureSourceAvailableForOpen(item))) {
+    pruneStaleMedia(src);
+    return;
+  }
   state.lightboxItems = scopedItems;
   state.lightboxIndex = index >= 0 ? index : 0;
   openLightbox();
+}
+
+async function ensureSourceAvailableForOpen(item) {
+  if (!item?.src) return false;
+  const sourceUrl = new URL(item.src, document.baseURI);
+  if (!["http:", "https:"].includes(sourceUrl.protocol)) return true;
+  const key = sourceUrl.href;
+  if (STALE_MEDIA_CACHE.has(key)) return STALE_MEDIA_CACHE.get(key);
+
+  let available = false;
+  try {
+    const response = await fetch(sourceUrl.href, { method: "HEAD", cache: "no-store" });
+    available = response.ok || response.status === 405;
+    if (response.status === 405) {
+      const rangeResponse = await fetch(sourceUrl.href, {
+        method: "GET",
+        cache: "no-store",
+        headers: { Range: "bytes=0-0" }
+      });
+      available = rangeResponse.ok || rangeResponse.status === 206;
+    }
+  } catch (error) {
+    available = true;
+  }
+
+  STALE_MEDIA_CACHE.set(key, available);
+  return available;
+}
+
+function pruneStaleMedia(src) {
+  pruneStaleMediaBatch([src]);
+}
+
+function scheduleDisplayedSourceValidation(items) {
+  if (!["http:", "https:"].includes(window.location.protocol)) return;
+  const uniqueItems = Array.from(
+    new Map(items.filter(Boolean).map((item) => [item.src, item])).values()
+  );
+  if (!uniqueItems.length) return;
+
+  const token = sourceValidationToken + 1;
+  sourceValidationToken = token;
+  scheduleIdleWork(() => validateDisplayedSources(uniqueItems, token));
+}
+
+async function validateDisplayedSources(items, token) {
+  const staleSources = [];
+  const chunkSize = getDeviceProfile().mobile ? 3 : 6;
+  for (let index = 0; index < items.length; index += chunkSize) {
+    if (token !== sourceValidationToken) return;
+    const chunk = items.slice(index, index + chunkSize);
+    const results = await Promise.all(chunk.map(async (item) => ({
+      item,
+      available: await ensureSourceAvailableForOpen(item)
+    })));
+    results.forEach(({ item, available }) => {
+      if (!available) staleSources.push(item.src);
+    });
+  }
+  if (token === sourceValidationToken && staleSources.length) {
+    pruneStaleMediaBatch(staleSources);
+  }
+}
+
+function pruneStaleMediaBatch(sources) {
+  const stale = new Set(sources.filter(Boolean));
+  if (!stale.size) return;
+  sourceValidationToken += 1;
+  const before = mediaItems.length;
+  mediaItems = mediaItems.filter((item) => !stale.has(item.src));
+  if (mediaItems.length === before) return;
+  state.sphere.focusIndex = 0;
+  state.sphere.userZoomed = false;
+  renderSphereSpy(null);
+  renderMemorySphere();
+  renderGallery();
 }
 
 function openLightbox() {
